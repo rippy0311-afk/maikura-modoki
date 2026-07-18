@@ -37,8 +37,12 @@ class Player {
 
   // 体のどこかが水中か
   inWater(world) {
-    const b = world.get(Math.floor(this.pos.x), Math.floor(this.pos.y + 0.9), Math.floor(this.pos.z));
-    return b === BLOCK.WATER;
+    const x = Math.floor(this.pos.x);
+    const z = Math.floor(this.pos.z);
+    const feet = world.get(x, Math.floor(this.pos.y + 0.15), z);
+    const body = world.get(x, Math.floor(this.pos.y + 0.9), z);
+    const head = world.get(x, Math.floor(this.pos.y + this.eye), z);
+    return feet === BLOCK.WATER || body === BLOCK.WATER || head === BLOCK.WATER;
   }
 
   spawn(world) {
@@ -120,10 +124,10 @@ class Player {
       if (keys.has(bind.descend)) vy -= this.flySpeed;
       this.vel.y += (vy - this.vel.y) * Math.min(1, 20 * dt);
     } else if (swimming) {
-      this.vel.y -= 8 * dt;
-      if (keys.has(bind.ascend)) this.vel.y = 4.5;
-      this.vel.y = Math.max(this.vel.y, -4);
-      this.vel.x *= 0.85; this.vel.z *= 0.85;
+      this.vel.y -= 4.2 * dt;
+      if (keys.has(bind.ascend) || keys.has(bind.jump)) this.vel.y = Math.max(this.vel.y, 6.2);
+      this.vel.y = Math.max(this.vel.y, -2.2);
+      this.vel.x *= 0.88; this.vel.z *= 0.88;
     } else {
       this.vel.y -= this.gravity * dt;
       if (keys.has(bind.jump) && this.onGround) {
