@@ -64,7 +64,7 @@ function tileForFace(blockId, dirY) {
 
 // ホットバー用ブロック(キー1〜9)
 const HOTBAR_BLOCKS = [
-  { id: BLOCK.GRASS,  label: '草',     color: '#6aaa40' },
+  { id: BLOCK.GRASS,  label: '草',     color: '#d43a32' },
   { id: BLOCK.DIRT,   label: '土',     color: '#866043' },
   { id: BLOCK.STONE,  label: '石',     color: '#7d7d7d' },
   { id: BLOCK.SAND,   label: '砂',     color: '#dacea0' },
@@ -103,10 +103,10 @@ function makeAtlasCanvas() {
     }
   }
 
-  drawTile(TILE_ID.GRASS_TOP, () => jitterColor(106, 170, 64, 16));
+  drawTile(TILE_ID.GRASS_TOP, () => jitterColor(212, 58, 50, 16));
   drawTile(TILE_ID.DIRT, () => jitterColor(134, 96, 67, 14));
   drawTile(TILE_ID.GRASS_SIDE, (x, y) => {
-    if (y < 3 || (y === 3 && rand() < 0.5)) return jitterColor(106, 170, 64, 16);
+    if (y < 3 || (y === 3 && rand() < 0.5)) return jitterColor(212, 58, 50, 16);
     return jitterColor(134, 96, 67, 14);
   });
   drawTile(TILE_ID.STONE, () => jitterColor(125, 125, 125, 16));
