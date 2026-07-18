@@ -42,6 +42,7 @@
   #panel:not(.settings-open) > h2,
   #panel:not(.settings-open) > select,
   #panel:not(.settings-open) > #key-config,
+  #panel:not(.settings-open) > #visual-settings,
   #panel:not(.settings-open) > #survival-section,
   #panel:not(.settings-open) > #presets,
   #panel:not(.settings-open) > #btn-regen,
@@ -53,6 +54,7 @@
   #panel.world-select-open > h2,
   #panel.world-select-open > select,
   #panel.world-select-open > #key-config,
+  #panel.world-select-open > #visual-settings,
   #panel.world-select-open > #survival-section,
   #panel.world-select-open > #presets,
   #panel.world-select-open > #btn-regen,
@@ -108,6 +110,14 @@
   }
   #key-config button.listening {
     background: #725c28; border-color: #ffd75e; color: #fff7d0;
+  }
+  #visual-settings {
+    display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center;
+    padding: 10px; background: rgba(0,0,0,0.48); color: #fff;
+    font-size: 13px;
+  }
+  #visual-settings input {
+    width: 22px; height: 22px; accent-color: #7fce62;
   }
   #world-select {
     display: none;
@@ -408,6 +418,12 @@
 
   <h2>キーコンフィグ</h2>
   <div id="key-config"></div>
+
+  <h2>表示設定</h2>
+  <div id="visual-settings">
+    <label for="toggle-shadows">影を表示</label>
+    <input id="toggle-shadows" type="checkbox" checked>
+  </div>
 
   <div id="survival-section">
     <h2>HP</h2>

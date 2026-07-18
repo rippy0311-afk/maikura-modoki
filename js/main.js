@@ -62,7 +62,7 @@ function rebuildChunk(cx, cz) {
   const old = chunkMeshes.get(key);
   if (old) disposeEntry(old);
 
-  const data = buildChunkMeshData(world, cx, cz);
+  const data = buildChunkMeshData(world, cx, cz, visualShadowsEnabled);
   const entry = { opaque: null, water: null };
 
   const og = makeGeometry(data.opaque);
@@ -190,10 +190,12 @@ let breathTimer = 0;
 let regenTimer = 0;
 const SAVE_COOKIE_NAME = 'block_world_save';
 const WORLD_LIST_STORAGE = 'block_world_worlds';
+const VISUAL_SHADOWS_STORAGE = 'block_world_visual_shadows';
 let lastSaveTime = 0;
 let lastCookieSaveTime = 0;
 let lastSavedPayload = '';
 let activeWorldId = null;
+let visualShadowsEnabled = localStorage.getItem(VISUAL_SHADOWS_STORAGE) !== 'off';
 
 function setSaveCookie(value) {
   const expires = new Date(Date.now() + 180 * 24 * 60 * 60 * 1000).toUTCString();
@@ -1394,6 +1396,18 @@ function setTouchButtonActive(el, active) {
   el.classList.toggle('active', active);
 }
 
+function setupVisualSettingsUI() {
+  const shadowToggle = document.getElementById('toggle-shadows');
+  if (!shadowToggle) return;
+  shadowToggle.checked = visualShadowsEnabled;
+  shadowToggle.addEventListener('change', () => {
+    visualShadowsEnabled = shadowToggle.checked;
+    localStorage.setItem(VISUAL_SHADOWS_STORAGE, visualShadowsEnabled ? 'on' : 'off');
+    if (world) rebuildAllChunks();
+    saveGameState(true);
+  });
+}
+
 function setupTouchHoldButton(id, actionId) {
   const btn = document.getElementById(id);
   btn.addEventListener('pointerdown', (e) => {
@@ -1811,6 +1825,7 @@ setupMenuUI();
 buildHotbar();
 setupGameModeUI();
 setupKeyConfigUI();
+setupVisualSettingsUI();
 setupTouchControls();
 setupInventoryUI();
 setupChatUI();

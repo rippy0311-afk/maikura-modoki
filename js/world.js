@@ -344,7 +344,7 @@ const CUBE_FACES = [
 ];
 
 // チャンク (cx, cz) のメッシュデータを作る。opaque と water に分ける。
-function buildChunkMeshData(world, cx, cz) {
+function buildChunkMeshData(world, cx, cz, shadowsEnabled = true) {
   const opaque = { positions: [], uvs: [], colors: [], indices: [] };
   const water = { positions: [], uvs: [], colors: [], indices: [] };
 
@@ -387,7 +387,7 @@ function buildChunkMeshData(world, cx, cz) {
               (tu + uv[0]) / ATLAS_COLS,
               1 - (tv + 1 - uv[1]) / ATLAS_ROWS
             );
-            const s = face.shade;
+            const s = shadowsEnabled ? face.shade : 1;
             if (tint) buf.colors.push(tint[0] * s, tint[1] * s, tint[2] * s);
             else buf.colors.push(s, s, s);
           }
