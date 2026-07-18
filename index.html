@@ -340,6 +340,21 @@
     border: 1px solid rgba(255,255,255,0.22); border-radius: 5px;
   }
   #allowed-list { margin-top: 5px; color: #ffd75e; overflow-wrap: anywhere; }
+  #voice-panel {
+    position: fixed; left: 12px; bottom: 92px; z-index: 13;
+    display: flex; gap: 6px; align-items: center; flex-wrap: wrap;
+    max-width: calc(100vw - 24px); padding: 8px;
+    background: rgba(20, 24, 34, 0.82); color: #eef2f7;
+    border: 2px solid rgba(255,255,255,0.16); border-radius: 8px;
+    backdrop-filter: blur(4px); font-size: 12px;
+  }
+  #voice-panel button {
+    padding: 5px 8px; background: #3a4356; color: #eef2f7;
+    border: 1px solid rgba(255,255,255,0.25); border-radius: 5px;
+    font-size: 12px;
+  }
+  #voice-panel button:disabled { opacity: 0.55; }
+  #voice-status { color: #9fd08a; }
 
   /* クリックで開始オーバーレイ */
   #overlay {
@@ -409,6 +424,7 @@
     #hud { top: max(10px, env(safe-area-inset-top)); right: max(10px, env(safe-area-inset-right)); }
     #hotbar { bottom: max(170px, calc(env(safe-area-inset-bottom) + 150px)); transform: translateX(-50%) scale(0.9); transform-origin: bottom center; }
     #chat-panel { right: 10px; bottom: max(250px, calc(env(safe-area-inset-bottom) + 230px)); width: 290px; }
+    #voice-panel { left: 10px; bottom: max(250px, calc(env(safe-area-inset-bottom) + 230px)); }
   }
 </style>
 </head>
@@ -496,6 +512,13 @@
 
 </div>
 
+<div id="voice-panel">
+  <button id="btn-voice-join" type="button">ボイス参加</button>
+  <button id="btn-voice-mute" type="button">ミュート</button>
+  <button id="btn-voice-config" type="button">設定</button>
+  <span id="voice-status">未接続</span>
+</div>
+
 <div id="crosshair">+</div>
 <div id="survival-hud">
   <div id="hud-hp-hearts"></div>
@@ -564,5 +587,7 @@
 <script src="js/world.js"></script>
 <script src="js/player.js"></script>
 <script src="js/main.js"></script>
+<script src="js/voice_config.js"></script>
+<script src="js/voice.js"></script>
 </body>
 </html>

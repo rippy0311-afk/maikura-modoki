@@ -33,3 +33,16 @@ index.html ??????????GitHub Pages ??????????
 `scripts/start-auto-push.bat` を起動すると、ファイル変更を検知して自動で `git add -A`、`git commit`、`git pull --rebase`、`git push` を実行します。
 
 共同編集で衝突した場合は `.auto-push.log` にエラーを書いて停止します。衝突を直してから、もう一度 `scripts/start-auto-push.bat` を起動してください。
+
+## Voice chat
+
+ゲーム内ボイスチャットは WebRTC を使います。GitHub Pages だけでは通話相手を探せないため、別サーバーで `server/voice-server.js` を起動してください。
+
+ローカル確認:
+
+```bash
+npm install
+npm run start:voice
+```
+
+公開する場合は Render / Railway / Fly.io などにこのリポジトリをつなぎ、起動コマンドを `npm run start:voice` にします。公開URLが `https://example.com` の場合、ゲーム側のボイス設定には `wss://example.com` を入力します。
