@@ -20,6 +20,7 @@ class Player {
     this.flySpeed = 16;
     this.jumpVel = 8.4;
     this.gravity = 26;
+    this.stepAssist = false;
   }
 
   eyePos() {
@@ -139,6 +140,7 @@ class Player {
     const fallSpeed = Math.max(0, -this.vel.y);
 
     // 軸ごとに移動して衝突解決
+    this.stepAssist = swimming;
     this.onGround = false;
     this.landedFallSpeed = 0;
     this.moveAxis(world, 'x', this.vel.x * dt);
@@ -181,6 +183,18 @@ class Player {
       }
       this.vel.y = 0;
     } else {
+      if (this.stepAssist) {
+        const blockedPos = this.pos[axis];
+        const originalY = this.pos.y;
+        this.pos.y += 1.05;
+        if (!this.collides(world)) {
+          this.onGround = true;
+          this.vel.y = 0;
+          return;
+        }
+        this.pos.y = originalY;
+        this.pos[axis] = blockedPos;
+      }
       const half = this.halfW;
       if (delta > 0) {
         this.pos[axis] = Math.floor(this.pos[axis] + half) - half - eps;
