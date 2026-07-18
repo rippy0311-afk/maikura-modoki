@@ -89,6 +89,23 @@ function rebuildAllChunks() {
   }
 }
 
+async function rebuildAllChunksWithProgress(onProgress) {
+  for (const entry of chunkMeshes.values()) disposeEntry(entry);
+  chunkMeshes.clear();
+  const nx = Math.ceil(world.sx / CHUNK);
+  const nz = Math.ceil(world.sz / CHUNK);
+  const total = nx * nz;
+  let done = 0;
+  for (let cz = 0; cz < nz; cz++) {
+    for (let cx = 0; cx < nx; cx++) {
+      rebuildChunk(cx, cz);
+      done++;
+    }
+    onProgress?.(done / total);
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+  }
+}
+
 // ブロック編集後、隣接チャンクの境界も含めて再構築
 function rebuildAround(x, y, z) {
   const cx = Math.floor(x / CHUNK), cz = Math.floor(z / CHUNK);
@@ -378,13 +395,13 @@ function createRandomWorld() {
   enterWorld(record);
 }
 
-function enterWorld(worldInfo) {
+async function enterWorld(worldInfo) {
   activeWorldId = worldInfo.id;
   gameMode = worldInfo.mode === 'survival' ? 'survival' : 'creative';
   blockColorOverrides = normalizeBlockColors(worldInfo.blockColors);
   const modeSelect = document.getElementById('game-mode-select');
   if (modeSelect) modeSelect.value = gameMode;
-  regenerate(worldInfo.preset, worldInfo.seed, worldInfo);
+  await regenerate(worldInfo.preset, worldInfo.seed, worldInfo);
   resumeGame();
 }
 
@@ -393,6 +410,24 @@ const panel = document.getElementById('panel');
 const hudPos = document.getElementById('hud-pos');
 const hudMode = document.getElementById('hud-mode');
 const waterOverlay = document.getElementById('water-overlay');
+const loadingScreen = document.getElementById('loading-screen');
+const loadingFill = document.getElementById('loading-fill');
+const loadingText = document.getElementById('loading-text');
+
+function setLoadingProgress(progress, text = 'ロード中...') {
+  if (!loadingScreen || !loadingFill || !loadingText) return;
+  loadingScreen.style.display = 'flex';
+  loadingText.textContent = text;
+  loadingFill.style.width = `${Math.max(0, Math.min(100, Math.round(progress * 100)))}%`;
+}
+
+function hideLoadingProgress() {
+  if (loadingScreen) loadingScreen.style.display = 'none';
+}
+
+function nextFrame() {
+  return new Promise((resolve) => requestAnimationFrame(resolve));
+}
 
 function hasTouchControls() {
   return window.matchMedia('(pointer: coarse), (max-width: 900px)').matches || navigator.maxTouchPoints > 0;
@@ -1718,13 +1753,20 @@ function setupChatUI() {
   });
 }
 
-function regenerate(presetKey, seed = null, savedState = null, shouldSave = true) {
+async function regenerate(presetKey, seed = null, savedState = null, shouldSave = true) {
+  setLoadingProgress(0.05, 'ワールドを読み込み中...');
+  await nextFrame();
   currentPreset = presetKey;
   currentSeed = seed ?? ((Math.random() * 0xffffffff) >>> 0);
   if (savedState) blockColorOverrides = normalizeBlockColors(savedState.blockColors);
+  setLoadingProgress(0.18, '地形を生成中...');
+  await nextFrame();
   world = generateWorld(presetKey, currentSeed);
   applyBlockColorOverrides();
-  rebuildAllChunks();
+  setLoadingProgress(0.35, 'ブロックを描画中...');
+  await rebuildAllChunksWithProgress((progress) => {
+    setLoadingProgress(0.35 + progress * 0.6, 'ブロックを描画中...');
+  });
   player.spawn(world);
   if (savedState) restorePlayerState(savedState);
   player.fly = false;
@@ -1737,6 +1779,9 @@ function regenerate(presetKey, seed = null, savedState = null, shouldSave = true
     btn.classList.toggle('active', btn.dataset.preset === presetKey);
   });
   if (shouldSave) saveGameState(true);
+  setLoadingProgress(1, '完了');
+  await nextFrame();
+  hideLoadingProgress();
 }
 
 function buildPresetButtons() {
@@ -1745,10 +1790,10 @@ function buildPresetButtons() {
     const btn = document.createElement('button');
     btn.textContent = p.label;
     btn.dataset.preset = key;
-    btn.addEventListener('click', () => regenerate(key));
+    btn.addEventListener('click', () => { regenerate(key); });
     box.appendChild(btn);
   }
-  document.getElementById('btn-regen').addEventListener('click', () => regenerate(currentPreset));
+  document.getElementById('btn-regen').addEventListener('click', () => { regenerate(currentPreset); });
 }
 
 function setupMenuUI() {
@@ -1896,6 +1941,8 @@ setupVisualSettingsUI();
 setupTouchControls();
 setupInventoryUI();
 setupChatUI();
-regenerate('plains', null, null, false);
-renderWorldList();
-animate();
+(async () => {
+  await regenerate('plains', null, null, false);
+  renderWorldList();
+  animate();
+})();
