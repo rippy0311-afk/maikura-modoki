@@ -352,6 +352,40 @@ function scheduleTextureEditorRefresh() {
   });
 }
 
+async function applyTextureEditorDraft() {
+  if (!textureEditorDraft) return;
+  const block = HOTBAR_BLOCKS.find((item) => item.id === textureEditorBlockId);
+  const blockName = block?.label || 'ブロック';
+
+  try {
+    setLoadingProgress(0.08, `「${blockName}」の見た目を保存中...`);
+    await nextFrame();
+
+    blockTextureOverrides[textureEditorBlockId] = textureEditorDraft.slice();
+    setLoadingProgress(0.25, 'テクスチャを作り直し中...');
+    await nextFrame();
+    applyBlockColorOverrides();
+
+    if (world) {
+      setLoadingProgress(0.45, 'ワールドのブロック表示を更新中...');
+      await rebuildAllChunksWithProgress((progress) => {
+        setLoadingProgress(0.45 + progress * 0.4, 'ワールドのブロック表示を更新中...');
+      });
+    }
+
+    setLoadingProgress(0.9, 'ホットバーとインベントリーを更新中...');
+    await nextFrame();
+    buildHotbar();
+    if (inventoryOpen) renderInventoryScreen();
+    saveGameState(true);
+
+    setLoadingProgress(1, '完了');
+    await nextFrame();
+  } finally {
+    hideLoadingProgress();
+  }
+}
+
 function setSaveCookie(value) {
   const expires = new Date(Date.now() + 180 * 24 * 60 * 60 * 1000).toUTCString();
   document.cookie = `${SAVE_COOKIE_NAME}=${value}; expires=${expires}; path=/; SameSite=Lax`;
@@ -1773,13 +1807,13 @@ function renderBlockColorSettingsUI() {
   apply.type = 'button';
   apply.className = 'texture-apply-button';
   apply.textContent = '適用';
-  apply.addEventListener('click', () => {
-    blockTextureOverrides[textureEditorBlockId] = textureEditorDraft.slice();
-    applyBlockColorOverrides();
-    rebuildAllChunks();
-    buildHotbar();
-    if (inventoryOpen) renderInventoryScreen();
-    saveGameState(true);
+  apply.addEventListener('click', async () => {
+    apply.disabled = true;
+    try {
+      await applyTextureEditorDraft();
+    } finally {
+      apply.disabled = false;
+    }
   });
   actions.appendChild(apply);
 
