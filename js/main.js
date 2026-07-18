@@ -206,6 +206,26 @@ let placingHeld = false;
 let placeCooldown = 0;
 let lastPlaceTime = 0;
 const PLACE_COOLDOWN = 0.18;
+const LANGUAGE_STORAGE = 'block_world_language';
+const UI_TEXT = {
+  ja: {
+    title: 'ブロックワールド',
+    pageTitle: 'ブロックワールド — マイクラ風3D',
+    play: 'プレイ',
+    settings: '設定',
+    exit: '終了',
+    resume: '再開',
+  },
+  en: {
+    title: 'BLOCK WORLD',
+    pageTitle: 'BLOCK WORLD — Voxel 3D',
+    play: 'Play',
+    settings: 'Settings',
+    exit: 'Exit',
+    resume: 'Resume',
+  },
+};
+let currentLanguage = localStorage.getItem(LANGUAGE_STORAGE) === 'en' ? 'en' : 'ja';
 let gameMode = 'creative';
 const KEY_BINDINGS = {
   forward: 'KeyW',
@@ -412,8 +432,7 @@ function showTitleMenu() {
   clearMovementState();
   if (pointerLocked && document.exitPointerLock) document.exitPointerLock();
   panel.classList.remove('hidden', 'settings-open', 'world-select-open', 'pause-open');
-  document.getElementById('btn-resume').textContent = 'プレイ';
-  document.getElementById('btn-settings').textContent = '設定';
+  applyLanguage();
   overlay.style.display = 'none';
 }
 
@@ -473,6 +492,35 @@ function hideLoadingProgress() {
 
 function nextFrame() {
   return new Promise((resolve) => requestAnimationFrame(resolve));
+}
+
+function applyLanguage() {
+  const text = UI_TEXT[currentLanguage];
+  document.documentElement.lang = currentLanguage;
+  document.title = text.pageTitle;
+
+  const titleLogo = document.getElementById('title-logo');
+  if (titleLogo) {
+    titleLogo.textContent = text.title;
+    titleLogo.classList.toggle('lang-ja', currentLanguage === 'ja');
+    titleLogo.classList.toggle('lang-en', currentLanguage === 'en');
+  }
+
+  const resumeButton = document.getElementById('btn-resume');
+  const settingsButton = document.getElementById('btn-settings');
+  const exitButton = document.getElementById('btn-exit');
+  if (resumeButton) resumeButton.textContent = panel?.classList.contains('pause-open') ? text.resume : text.play;
+  if (settingsButton) settingsButton.textContent = text.settings;
+  if (exitButton) exitButton.textContent = text.exit;
+
+  document.getElementById('btn-lang-ja')?.classList.toggle('active', currentLanguage === 'ja');
+  document.getElementById('btn-lang-en')?.classList.toggle('active', currentLanguage === 'en');
+}
+
+function setLanguage(language) {
+  currentLanguage = language === 'en' ? 'en' : 'ja';
+  localStorage.setItem(LANGUAGE_STORAGE, currentLanguage);
+  applyLanguage();
 }
 
 function hasTouchControls() {
@@ -536,8 +584,7 @@ function openPauseMenu() {
   if (pointerLocked && document.exitPointerLock) document.exitPointerLock();
   panel.classList.remove('hidden', 'world-select-open', 'settings-open');
   panel.classList.add('pause-open');
-  document.getElementById('btn-resume').textContent = '再開';
-  document.getElementById('btn-settings').textContent = '設定';
+  applyLanguage();
   overlay.style.display = 'none';
 }
 
@@ -1855,6 +1902,9 @@ function setupMenuUI() {
     saveGameState(true);
     showTitleMenu();
   });
+  document.getElementById('btn-lang-ja')?.addEventListener('click', () => setLanguage('ja'));
+  document.getElementById('btn-lang-en')?.addEventListener('click', () => setLanguage('en'));
+  applyLanguage();
 }
 
 function updateHudMode() {
