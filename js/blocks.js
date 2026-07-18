@@ -31,8 +31,9 @@ const TILE_ID = {
 };
 
 const ATLAS_COLS = 8;
-const ATLAS_ROWS = 3;
+const ATLAS_ROWS = 5;
 const TILE_PX = 16;
+const CUSTOM_TILE_START = 24;
 
 // ブロックごとの面タイル { top, side, bottom }
 const BLOCK_TILES = {
@@ -60,6 +61,11 @@ function tileForFace(blockId, dirY) {
   if (dirY === 1) return t.top;
   if (dirY === -1) return t.bottom;
   return t.side;
+}
+
+function customTileForBlock(blockId) {
+  const index = HOTBAR_BLOCKS.findIndex((item) => item.id === blockId);
+  return index >= 0 ? CUSTOM_TILE_START + index : null;
 }
 
 // ホットバー用ブロック(キー1〜9)
@@ -172,4 +178,25 @@ function makeAtlasCanvas() {
   });
 
   return canvas;
+}
+
+function drawCustomBlockTextures(canvas, textures) {
+  const ctx = canvas.getContext('2d');
+  if (!ctx || !textures) return;
+  for (const block of HOTBAR_BLOCKS) {
+    const pixels = textures[block.id];
+    if (!Array.isArray(pixels) || pixels.length !== TILE_PX * TILE_PX) continue;
+    const tileIndex = customTileForBlock(block.id);
+    const x0 = (tileIndex % ATLAS_COLS) * TILE_PX;
+    const y0 = Math.floor(tileIndex / ATLAS_COLS) * TILE_PX;
+    for (let y = 0; y < TILE_PX; y++) {
+      for (let x = 0; x < TILE_PX; x++) {
+        const color = pixels[y * TILE_PX + x];
+        if (typeof color === 'string' && /^#[0-9a-f]{6}$/i.test(color)) {
+          ctx.fillStyle = color;
+          ctx.fillRect(x0 + x, y0 + y, 1, 1);
+        }
+      }
+    }
+  }
 }

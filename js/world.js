@@ -15,6 +15,7 @@ class World {
     this.lootChests = new Map();
     this.itemNodes = new Map();
     this.blockColors = {};
+    this.blockTextures = {};
     this.colors = new Map(); // COLOR ブロックの色 (index -> 0xRRGGBB)
     // 列ごとの「これより上は空気」の目安。メッシュ化で上空の走査を打ち切るのに使う。
     // 実際の最上面以上であれば良い(高めに見積もる分には安全)。
@@ -407,7 +408,8 @@ function buildChunkMeshData(world, cx, cz, shadowsEnabled = true) {
         const buf = isWater ? water : opaque;
         const onEdge = yEdge || zEdge || x === 0 || x === sx - 1;
 
-        let tint = blockColorToTint(world.blockColors?.[id]);
+        const hasBlockTexture = Array.isArray(world.blockTextures?.[id]);
+        let tint = hasBlockTexture ? null : blockColorToTint(world.blockColors?.[id]);
         const hasBlockColor = Boolean(tint);
         if (id === BLOCK.COLOR || id === BLOCK.ITEM_NODE) {
           const rgb = world.getColor(x, y, z);
@@ -427,7 +429,7 @@ function buildChunkMeshData(world, cx, cz, shadowsEnabled = true) {
           }
           if (!visible) continue;
 
-          const tileIdx = hasBlockColor ? TILE_ID.WHITE : tileForFace(id, face.dir[1]);
+          const tileIdx = hasBlockTexture ? customTileForBlock(id) : (hasBlockColor ? TILE_ID.WHITE : tileForFace(id, face.dir[1]));
           const tu = tileIdx % ATLAS_COLS;
           const tv = Math.floor(tileIdx / ATLAS_COLS);
 

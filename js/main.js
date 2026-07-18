@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 
 /* ============ 基本セットアップ ============ */
 const canvas = document.getElementById('game');
@@ -21,7 +21,8 @@ window.addEventListener('resize', () => {
 });
 
 /* ============ テクスチャ & マテリアル ============ */
-const atlasTexture = new THREE.CanvasTexture(makeAtlasCanvas());
+const atlasCanvas = makeAtlasCanvas();
+const atlasTexture = new THREE.CanvasTexture(atlasCanvas);
 atlasTexture.magFilter = THREE.NearestFilter;
 atlasTexture.minFilter = THREE.NearestFilter;
 atlasTexture.generateMipmaps = false;
@@ -280,6 +281,11 @@ let lastSavedPayload = '';
 let activeWorldId = null;
 let visualShadowsEnabled = localStorage.getItem(VISUAL_SHADOWS_STORAGE) !== 'off';
 let blockColorOverrides = {};
+let blockTextureOverrides = {};
+let textureEditorBlockId = BLOCK.GRASS;
+let textureEditorPaintColor = '#3c7828';
+let textureEditorMouseDown = false;
+let textureEditorRefreshPending = false;
 
 function normalizeBlockColors(raw) {
   const colors = {};
@@ -291,7 +297,27 @@ function normalizeBlockColors(raw) {
   return colors;
 }
 
+function normalizeBlockTextures(raw) {
+  const textures = {};
+  if (!raw || typeof raw !== 'object') return textures;
+  for (const item of HOTBAR_BLOCKS) {
+    const pixels = raw[item.id];
+    if (Array.isArray(pixels) && pixels.length === TILE_PX * TILE_PX &&
+        pixels.every((color) => typeof color === 'string' && /^#[0-9a-f]{6}$/i.test(color))) {
+      textures[item.id] = pixels.map((color) => color.toLowerCase());
+    }
+  }
+  return textures;
+}
+
+function makeSolidTexture(color) {
+  const safeColor = typeof color === 'string' && /^#[0-9a-f]{6}$/i.test(color) ? color.toLowerCase() : '#8b8f98';
+  return Array(TILE_PX * TILE_PX).fill(safeColor);
+}
+
 function getBlockDisplayColor(blockId) {
+  const texture = blockTextureOverrides[blockId];
+  if (texture?.[0]) return texture[0];
   const override = blockColorOverrides[blockId];
   if (override) return override;
   return HOTBAR_BLOCKS.find((item) => item.id === blockId)?.color || '#8b8f98';
@@ -299,7 +325,30 @@ function getBlockDisplayColor(blockId) {
 
 function applyBlockColorOverrides() {
   blockColorOverrides = normalizeBlockColors(blockColorOverrides);
-  if (world) world.blockColors = { ...blockColorOverrides };
+  blockTextureOverrides = normalizeBlockTextures(blockTextureOverrides);
+  const baseAtlas = makeAtlasCanvas();
+  const ctx = atlasCanvas.getContext('2d');
+  ctx.clearRect(0, 0, atlasCanvas.width, atlasCanvas.height);
+  ctx.drawImage(baseAtlas, 0, 0);
+  drawCustomBlockTextures(atlasCanvas, blockTextureOverrides);
+  atlasTexture.needsUpdate = true;
+  if (world) {
+    world.blockColors = { ...blockColorOverrides };
+    world.blockTextures = { ...blockTextureOverrides };
+  }
+}
+
+function scheduleTextureEditorRefresh() {
+  if (textureEditorRefreshPending) return;
+  textureEditorRefreshPending = true;
+  requestAnimationFrame(() => {
+    textureEditorRefreshPending = false;
+    applyBlockColorOverrides();
+    rebuildAllChunks();
+    buildHotbar();
+    if (inventoryOpen) renderInventoryScreen();
+    saveGameState(true);
+  });
 }
 
 function setSaveCookie(value) {
@@ -337,7 +386,7 @@ function saveGameState(force = false) {
   if (!force && encoded === lastSavedPayload) return;
   lastSavedPayload = encoded;
   localStorage.setItem(SAVE_COOKIE_NAME, encoded);
-  if (force || now - lastCookieSaveTime > 30000) {
+  if (encoded.length < 3800 && (force || now - lastCookieSaveTime > 30000)) {
     setSaveCookie(encoded);
     lastCookieSaveTime = now;
   }
@@ -389,6 +438,7 @@ function makeCurrentState() {
     hp: playerHp,
     fly: player.fly,
     blockColors: { ...blockColorOverrides },
+    blockTextures: { ...blockTextureOverrides },
     x: Number(player.pos.x.toFixed(3)),
     y: Number(player.pos.y.toFixed(3)),
     z: Number(player.pos.z.toFixed(3)),
@@ -452,6 +502,7 @@ function createRandomWorld() {
     seed: (Math.random() * 0xffffffff) >>> 0,
     mode: gameMode,
     blockColors: {},
+    blockTextures: {},
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };
@@ -464,6 +515,7 @@ async function enterWorld(worldInfo) {
   activeWorldId = worldInfo.id;
   gameMode = worldInfo.mode === 'survival' ? 'survival' : 'creative';
   blockColorOverrides = normalizeBlockColors(worldInfo.blockColors);
+  blockTextureOverrides = normalizeBlockTextures(worldInfo.blockTextures);
   const modeSelect = document.getElementById('game-mode-select');
   if (modeSelect) modeSelect.value = gameMode;
   await regenerate(worldInfo.preset, worldInfo.seed, worldInfo);
@@ -1567,28 +1619,95 @@ function renderBlockColorSettingsUI() {
   const box = document.getElementById('block-color-settings');
   if (!box) return;
   box.innerHTML = '';
-  HOTBAR_BLOCKS.forEach((block) => {
-    const label = document.createElement('label');
-    label.textContent = block.label;
-    const input = document.createElement('input');
-    input.type = 'color';
-    input.value = getBlockDisplayColor(block.id);
-    input.addEventListener('input', () => {
-      blockColorOverrides[block.id] = input.value.toLowerCase();
-      applyBlockColorOverrides();
-      rebuildAllChunks();
-      buildHotbar();
-      if (inventoryOpen) renderInventoryScreen();
-      saveGameState(true);
-    });
-    box.appendChild(label);
-    box.appendChild(input);
-  });
 
-  const reset = document.createElement('button');
-  reset.type = 'button';
-  reset.textContent = '色をリセット';
-  reset.addEventListener('click', () => {
+  const picker = document.createElement('select');
+  picker.id = 'texture-block-select';
+  HOTBAR_BLOCKS.forEach((block) => {
+    const option = document.createElement('option');
+    option.value = block.id;
+    option.textContent = block.label;
+    picker.appendChild(option);
+  });
+  picker.value = String(textureEditorBlockId);
+  picker.addEventListener('change', () => {
+    textureEditorBlockId = Number(picker.value);
+    renderBlockColorSettingsUI();
+  });
+  box.appendChild(picker);
+
+  const colorInput = document.createElement('input');
+  colorInput.type = 'color';
+  colorInput.value = textureEditorPaintColor;
+  colorInput.addEventListener('input', () => {
+    textureEditorPaintColor = colorInput.value.toLowerCase();
+  });
+  box.appendChild(colorInput);
+
+  const grid = document.createElement('div');
+  grid.id = 'texture-pixel-grid';
+  const texture = (blockTextureOverrides[textureEditorBlockId] ||
+    makeSolidTexture(blockColorOverrides[textureEditorBlockId] || getBlockDisplayColor(textureEditorBlockId))).slice();
+
+  function paintPixel(index) {
+    texture[index] = textureEditorPaintColor;
+    blockTextureOverrides[textureEditorBlockId] = texture;
+    scheduleTextureEditorRefresh();
+  }
+
+  texture.forEach((color, index) => {
+    const pixel = document.createElement('button');
+    pixel.type = 'button';
+    pixel.className = 'texture-pixel';
+    pixel.style.background = color;
+    pixel.addEventListener('pointerdown', (event) => {
+      event.preventDefault();
+      textureEditorMouseDown = true;
+      paintPixel(index);
+      pixel.style.background = textureEditorPaintColor;
+    });
+    pixel.addEventListener('pointerenter', () => {
+      if (!textureEditorMouseDown) return;
+      paintPixel(index);
+      pixel.style.background = textureEditorPaintColor;
+    });
+    grid.appendChild(pixel);
+  });
+  box.appendChild(grid);
+
+  const fill = document.createElement('button');
+  fill.type = 'button';
+  fill.textContent = 'この色で塗りつぶし';
+  fill.addEventListener('click', () => {
+    blockTextureOverrides[textureEditorBlockId] = makeSolidTexture(textureEditorPaintColor);
+    applyBlockColorOverrides();
+    renderBlockColorSettingsUI();
+    rebuildAllChunks();
+    buildHotbar();
+    if (inventoryOpen) renderInventoryScreen();
+    saveGameState(true);
+  });
+  box.appendChild(fill);
+
+  const resetBlock = document.createElement('button');
+  resetBlock.type = 'button';
+  resetBlock.textContent = 'このブロックをリセット';
+  resetBlock.addEventListener('click', () => {
+    delete blockTextureOverrides[textureEditorBlockId];
+    delete blockColorOverrides[textureEditorBlockId];
+    applyBlockColorOverrides();
+    renderBlockColorSettingsUI();
+    rebuildAllChunks();
+    buildHotbar();
+    if (inventoryOpen) renderInventoryScreen();
+    saveGameState(true);
+  });
+  box.appendChild(resetBlock);
+
+  const resetAll = document.createElement('button');
+  resetAll.type = 'button';
+  resetAll.textContent = '全部リセット';
+  resetAll.addEventListener('click', () => {
+    blockTextureOverrides = {};
     blockColorOverrides = {};
     applyBlockColorOverrides();
     renderBlockColorSettingsUI();
@@ -1597,9 +1716,12 @@ function renderBlockColorSettingsUI() {
     if (inventoryOpen) renderInventoryScreen();
     saveGameState(true);
   });
-  box.appendChild(reset);
+  box.appendChild(resetAll);
 }
 
+window.addEventListener('pointerup', () => {
+  textureEditorMouseDown = false;
+});
 function setupTouchHoldButton(id, actionId) {
   const btn = document.getElementById(id);
   btn.addEventListener('pointerdown', (e) => {
@@ -1852,6 +1974,7 @@ async function regenerate(presetKey, seed = null, savedState = null, shouldSave 
   currentPreset = presetKey;
   currentSeed = seed ?? ((Math.random() * 0xffffffff) >>> 0);
   if (savedState) blockColorOverrides = normalizeBlockColors(savedState.blockColors);
+  if (savedState) blockTextureOverrides = normalizeBlockTextures(savedState.blockTextures);
   setLoadingProgress(0.18, '地形を生成中...');
   await nextFrame();
   world = generateWorld(presetKey, currentSeed);
