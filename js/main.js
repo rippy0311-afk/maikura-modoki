@@ -798,12 +798,8 @@ const SURVIVAL_TOOLS = [
   { id: 'shears', label: 'ハサミ', targets: '葉' },
 ];
 
-const IRON_ARMOR = [
-  '鉄のヘルメット',
-  '鉄のチェストプレート',
-  '鉄のレギンス',
-  '鉄のブーツ',
-];
+// 装備スロット順。実体は CRAFT_ITEMS 側で定義され、所持数は survivalInventory が持つ。
+const ARMOR_ITEM_IDS = ['iron_helmet', 'iron_chestplate', 'iron_leggings', 'iron_boots'];
 
 const survivalInventory = {};
 for (const item of HOTBAR_BLOCKS) survivalInventory[item.id] = 0;
@@ -819,7 +815,7 @@ for (const item of RESOURCE_ITEMS) survivalInventory[item.id] = 0;
 
 const RESOURCE_DROPS = {
   [BLOCK.LOG]: 'wood',
-  [BLOCK.PLANK]: 'wood',
+  // 木材(PLANK)は wood を落とさない。落とすと wood→木材→壊す→wood が増殖レシピになる。
   [BLOCK.STONE]: 'stone',
   [BLOCK.COAL_ORE]: 'coal_ore',
   [BLOCK.IRON_ORE]: 'iron_ore',
@@ -922,7 +918,7 @@ const DRAGON_KIT_CATEGORIES = [
     ],
   },
 ];
-for (const item of IRON_ARMOR) survivalInventory[item] = 0;
+for (const itemId of Object.keys(CRAFT_ITEMS)) survivalInventory[itemId] = 0;
 
 function gameModeLabel() {
   return gameMode === 'survival' ? 'サバイバル' : 'クリエイティブ';
@@ -1101,7 +1097,11 @@ function getMainInventoryItems() {
     getInventoryCount(item.id),
     item.color
   ));
-  return resources.slice(0, 27);
+  // クラフトで手に入れたものは持っている分だけ並べる
+  const crafted = Object.entries(CRAFT_ITEMS)
+    .filter(([itemId]) => getInventoryCount(itemId) > 0)
+    .map(([itemId, item]) => makeSlotItem(itemId, item.label, getInventoryCount(itemId), item.color));
+  return resources.concat(crafted).slice(0, 27);
 }
 
 function renderInventoryScreen() {
@@ -1120,20 +1120,16 @@ function renderInventoryScreen() {
 
   const armorGrid = document.getElementById('armor-grid');
   armorGrid.innerHTML = '';
-  IRON_ARMOR.forEach((label, i) => {
-    renderMcSlot(armorGrid, makeSlotItem(`iron_armor_${i}`, label, 0, '#bfc5c9'), `armor-${i}`, () => {});
+  ARMOR_ITEM_IDS.forEach((itemId, i) => {
+    const item = CRAFT_ITEMS[itemId];
+    renderMcSlot(armorGrid, makeSlotItem(itemId, item.label, getInventoryCount(itemId), item.color), `armor-${i}`, () => {});
   });
 
   const offhand = document.getElementById('offhand-slot');
   offhand.innerHTML = '';
   renderMcSlot(offhand, null, 'offhand-0', () => {});
 
-  const craftGrid = document.getElementById('craft-grid');
-  craftGrid.innerHTML = '';
-  for (let i = 0; i < 4; i++) renderMcSlot(craftGrid, null, `craft-${i}`, () => {});
-  const craftResult = document.getElementById('craft-result');
-  craftResult.innerHTML = '';
-  renderMcSlot(craftResult, null, 'craft-result', () => {});
+  renderCraftRecipes();
 
   const mainGrid = document.getElementById('main-inventory-grid');
   mainGrid.innerHTML = '';
@@ -1153,6 +1149,36 @@ function renderInventoryScreen() {
       () => selectHotbar(i)
     );
   }
+}
+
+function renderCraftRecipes() {
+  const box = document.getElementById('craft-recipes');
+  if (!box) return;
+  box.innerHTML = '';
+  RECIPES.forEach((recipe) => {
+    const ready = canCraft(recipe);
+    const row = document.createElement('div');
+    row.className = 'craft-row' + (ready ? ' ready' : '');
+
+    const name = document.createElement('div');
+    name.className = 'craft-name';
+    name.innerHTML =
+      `<span class="swatch" style="background:${craftKeyColor(recipeOutputKey(recipe))}"></span>` +
+      `<span>${recipeLabel(recipe)}<span class="craft-need">${recipeInputText(recipe)}</span></span>`;
+
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = '作る';
+    button.disabled = !ready;
+    button.addEventListener('click', () => {
+      if (!craft(recipe)) return;
+      renderInventoryScreen();
+    });
+
+    row.appendChild(name);
+    row.appendChild(button);
+    box.appendChild(row);
+  });
 }
 
 function setInventoryOpen(open) {
@@ -1256,8 +1282,12 @@ function blockKey(x, y, z) {
   return `${x},${y},${z}`;
 }
 
+// 所持していないツールは選べていても効果を持たない(素手扱い)。
 function getSelectedToolId() {
-  return gameMode === 'survival' ? SURVIVAL_TOOLS[selectedToolIndex]?.id : 'creative';
+  if (gameMode !== 'survival') return 'creative';
+  const role = SURVIVAL_TOOLS[selectedToolIndex]?.id;
+  if (!role) return 'hand';
+  return ownedToolItem(role) ? role : 'hand';
 }
 
 function getPreferredTool(blockId) {
@@ -1458,11 +1488,12 @@ function buildSurvivalUI() {
   const tools = document.getElementById('tool-list');
   tools.innerHTML = '';
   SURVIVAL_TOOLS.forEach((tool, i) => {
+    const owned = ownedToolItem(tool.id);
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.className = 'tool-chip' + (i === selectedToolIndex ? ' selected' : '');
-    btn.title = tool.targets;
-    btn.textContent = tool.label;
+    btn.className = 'tool-chip' + (i === selectedToolIndex ? ' selected' : '') + (owned ? '' : ' unowned');
+    btn.title = owned ? tool.targets : `${tool.targets}(未所持・素手扱い)`;
+    btn.textContent = owned ? CRAFT_ITEMS[owned].label : `${tool.label}(未所持)`;
     btn.addEventListener('click', () => {
       selectedToolIndex = i;
       updateSurvivalUI();
@@ -1472,10 +1503,11 @@ function buildSurvivalUI() {
 
   const armor = document.getElementById('armor-list');
   armor.innerHTML = '';
-  IRON_ARMOR.forEach((label) => {
+  ARMOR_ITEM_IDS.forEach((itemId) => {
+    const count = getInventoryCount(itemId);
     const item = document.createElement('div');
-    item.className = 'item';
-    item.textContent = label;
+    item.className = 'item' + (count > 0 ? '' : ' unowned');
+    item.innerHTML = `<span>${CRAFT_ITEMS[itemId].label}</span><span class="count">${count}</span>`;
     armor.appendChild(item);
   });
 }
@@ -1508,9 +1540,8 @@ function updateSurvivalUI() {
     });
   }
 
-  document.querySelectorAll('#tool-list .tool-chip').forEach((el, i) => {
-    el.classList.toggle('selected', i === selectedToolIndex);
-  });
+  // 所持状況でツール名と装備の個数が変わるので作り直す
+  buildSurvivalUI();
 
   document.querySelectorAll('#hotbar .slot').forEach((el, i) => {
     const item = hotbarSlots[i];

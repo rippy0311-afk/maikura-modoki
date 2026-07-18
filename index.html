@@ -252,6 +252,8 @@
   #hud-hp-label { margin-top: 3px; font-size: 11px; color: #cfd8e4; }
   #tool-list { display: flex; flex-wrap: wrap; gap: 5px; }
   .tool-chip.selected { background: #5a7b3c; border-color: #9fd08a; }
+  .tool-chip.unowned { opacity: 0.45; }
+  #armor-list .item.unowned { opacity: 0.45; }
   #armor-list { display: grid; grid-template-columns: repeat(2, 1fr); gap: 5px; }
   #crosshair {
     position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
@@ -320,7 +322,30 @@
   }
   .slot-grid { display: grid; gap: 4px; }
   #armor-grid { grid-template-columns: repeat(2, 46px); }
-  #craft-grid { grid-template-columns: repeat(2, 46px); }
+  #craft-recipes {
+    display: grid; gap: 4px;
+    max-height: 156px; overflow-y: auto; padding-right: 4px;
+  }
+  .craft-row {
+    display: grid; grid-template-columns: 1fr auto; gap: 6px; align-items: center;
+    padding: 4px 6px;
+    background: rgba(0,0,0,0.26);
+    border: 1px solid rgba(255,255,255,0.14); border-radius: 5px;
+  }
+  .craft-row .craft-name { display: flex; align-items: center; gap: 5px; font-size: 11px; }
+  .craft-row .swatch {
+    width: 14px; height: 14px; flex: 0 0 auto;
+    border: 1px solid rgba(0,0,0,0.45);
+  }
+  .craft-row .craft-need { display: block; font-size: 9px; color: #9aa5b3; }
+  .craft-row.ready .craft-need { color: #9fd08a; }
+  .craft-row button {
+    padding: 3px 8px; font-size: 11px;
+    background: rgba(32,42,189,0.92); color: #fff;
+    border: 1px solid rgba(255,255,255,0.35); border-radius: 5px;
+  }
+  .craft-row button:disabled { opacity: 0.4; cursor: not-allowed; }
+  .craft-row.ready button { background: #4f8f3a; border-color: #7fce62; }
   #main-inventory-grid { grid-template-columns: repeat(9, 46px); }
   #inventory-hotbar-grid { grid-template-columns: repeat(9, 46px); }
   .mc-slot {
@@ -626,11 +651,7 @@
           <div id="player-preview">⛏</div>
           <div>
             <div class="inventory-label">クラフト</div>
-            <div style="display:grid; grid-template-columns:auto 32px 46px; gap:8px; align-items:center;">
-              <div id="craft-grid" class="slot-grid"></div>
-              <div class="craft-arrow">→</div>
-              <div id="craft-result"></div>
-            </div>
+            <div id="craft-recipes"></div>
           </div>
         </div>
         <div class="inventory-label">持ち物</div>
@@ -665,6 +686,7 @@
 <script src="js/blocks.js"></script>
 <script src="js/world.js"></script>
 <script src="js/player.js"></script>
+<script src="js/crafting.js"></script>
 <script src="js/main.js"></script>
 <script src="js/voice_config.js"></script>
 <script src="js/voice.js"></script>
