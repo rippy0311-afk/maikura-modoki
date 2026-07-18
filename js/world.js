@@ -14,6 +14,7 @@ class World {
     this.data = new Uint8Array(sx * sy * sz);
     this.lootChests = new Map();
     this.itemNodes = new Map();
+    this.blockColors = {};
     this.colors = new Map(); // COLOR ブロックの色 (index -> 0xRRGGBB)
   }
 
@@ -343,6 +344,12 @@ const CUBE_FACES = [
   { dir: [ 0, 0, 1], shade: 0.84, corners: [ [[0,0,1],[0,0]], [[1,0,1],[1,0]], [[0,1,1],[0,1]], [[1,1,1],[1,1]] ] },
 ];
 
+function blockColorToTint(hex) {
+  if (typeof hex !== 'string' || !/^#[0-9a-f]{6}$/i.test(hex)) return null;
+  const rgb = Number.parseInt(hex.slice(1), 16);
+  return [((rgb >> 16) & 255) / 255, ((rgb >> 8) & 255) / 255, (rgb & 255) / 255];
+}
+
 // チャンク (cx, cz) のメッシュデータを作る。opaque と water に分ける。
 function buildChunkMeshData(world, cx, cz, shadowsEnabled = true) {
   const opaque = { positions: [], uvs: [], colors: [], indices: [] };
@@ -360,7 +367,8 @@ function buildChunkMeshData(world, cx, cz, shadowsEnabled = true) {
         const isWater = id === BLOCK.WATER;
         const buf = isWater ? water : opaque;
 
-        let tint = null;
+        let tint = blockColorToTint(world.blockColors?.[id]);
+        const hasBlockColor = Boolean(tint);
         if (id === BLOCK.COLOR || id === BLOCK.ITEM_NODE) {
           const rgb = world.getColor(x, y, z);
           tint = [((rgb >> 16) & 255) / 255, ((rgb >> 8) & 255) / 255, (rgb & 255) / 255];
@@ -376,7 +384,7 @@ function buildChunkMeshData(world, cx, cz, shadowsEnabled = true) {
           }
           if (!visible) continue;
 
-          const tileIdx = tileForFace(id, face.dir[1]);
+          const tileIdx = hasBlockColor ? TILE_ID.WHITE : tileForFace(id, face.dir[1]);
           const tu = tileIdx % ATLAS_COLS;
           const tv = Math.floor(tileIdx / ATLAS_COLS);
 

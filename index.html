@@ -43,6 +43,7 @@
   #panel:not(.settings-open) > select,
   #panel:not(.settings-open) > #key-config,
   #panel:not(.settings-open) > #visual-settings,
+  #panel:not(.settings-open) > #block-color-settings,
   #panel:not(.settings-open) > #survival-section,
   #panel:not(.settings-open) > #presets,
   #panel:not(.settings-open) > #btn-regen,
@@ -55,6 +56,7 @@
   #panel.world-select-open > select,
   #panel.world-select-open > #key-config,
   #panel.world-select-open > #visual-settings,
+  #panel.world-select-open > #block-color-settings,
   #panel.world-select-open > #survival-section,
   #panel.world-select-open > #presets,
   #panel.world-select-open > #btn-regen,
@@ -118,6 +120,21 @@
   }
   #visual-settings input {
     width: 22px; height: 22px; accent-color: #7fce62;
+  }
+  #block-color-settings {
+    display: grid; grid-template-columns: 1fr 46px; gap: 7px 10px; align-items: center;
+    padding: 10px; background: rgba(0,0,0,0.48); color: #fff;
+    max-height: 220px; overflow: auto;
+  }
+  #block-color-settings label { font-size: 12px; }
+  #block-color-settings input {
+    width: 42px; height: 28px; padding: 0;
+    background: transparent; border: 1px solid rgba(255,255,255,0.35);
+  }
+  #block-color-settings button {
+    grid-column: 1 / -1; padding: 7px;
+    background: rgba(32,42,189,0.92); color: #fff;
+    border: 1px solid rgba(255,255,255,0.35); border-radius: 6px;
   }
   #world-select {
     display: none;
@@ -424,6 +441,9 @@
     <label for="toggle-shadows">影を表示</label>
     <input id="toggle-shadows" type="checkbox" checked>
   </div>
+
+  <h2>ブロックの色</h2>
+  <div id="block-color-settings"></div>
 
   <div id="survival-section">
     <h2>HP</h2>

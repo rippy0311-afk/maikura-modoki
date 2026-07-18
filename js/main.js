@@ -196,6 +196,28 @@ let lastCookieSaveTime = 0;
 let lastSavedPayload = '';
 let activeWorldId = null;
 let visualShadowsEnabled = localStorage.getItem(VISUAL_SHADOWS_STORAGE) !== 'off';
+let blockColorOverrides = {};
+
+function normalizeBlockColors(raw) {
+  const colors = {};
+  if (!raw || typeof raw !== 'object') return colors;
+  for (const item of HOTBAR_BLOCKS) {
+    const color = raw[item.id];
+    if (typeof color === 'string' && /^#[0-9a-f]{6}$/i.test(color)) colors[item.id] = color.toLowerCase();
+  }
+  return colors;
+}
+
+function getBlockDisplayColor(blockId) {
+  const override = blockColorOverrides[blockId];
+  if (override) return override;
+  return HOTBAR_BLOCKS.find((item) => item.id === blockId)?.color || '#8b8f98';
+}
+
+function applyBlockColorOverrides() {
+  blockColorOverrides = normalizeBlockColors(blockColorOverrides);
+  if (world) world.blockColors = { ...blockColorOverrides };
+}
 
 function setSaveCookie(value) {
   const expires = new Date(Date.now() + 180 * 24 * 60 * 60 * 1000).toUTCString();
@@ -283,6 +305,7 @@ function makeCurrentState() {
     mode: gameMode,
     hp: playerHp,
     fly: player.fly,
+    blockColors: { ...blockColorOverrides },
     x: Number(player.pos.x.toFixed(3)),
     y: Number(player.pos.y.toFixed(3)),
     z: Number(player.pos.z.toFixed(3)),
@@ -346,6 +369,7 @@ function createRandomWorld() {
     preset: randomPresetKey(),
     seed: (Math.random() * 0xffffffff) >>> 0,
     mode: gameMode,
+    blockColors: {},
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };
@@ -357,6 +381,7 @@ function createRandomWorld() {
 function enterWorld(worldInfo) {
   activeWorldId = worldInfo.id;
   gameMode = worldInfo.mode === 'survival' ? 'survival' : 'creative';
+  blockColorOverrides = normalizeBlockColors(worldInfo.blockColors);
   const modeSelect = document.getElementById('game-mode-select');
   if (modeSelect) modeSelect.value = gameMode;
   regenerate(worldInfo.preset, worldInfo.seed, worldInfo);
@@ -834,7 +859,7 @@ function getCatalogItem(id) {
 }
 
 function getCreativeCatalogItems() {
-  const hotbarItems = HOTBAR_BLOCKS.map((item) => makeSlotItem(item.id, item.label, 1, item.color));
+  const hotbarItems = HOTBAR_BLOCKS.map((item) => makeSlotItem(item.id, item.label, 1, getBlockDisplayColor(item.id)));
   const resources = RESOURCE_ITEMS.map((item) => makeSlotItem(item.id, item.label, 1, item.color));
   const seen = new Set();
   return hotbarItems.concat(resources).filter((item) => {
@@ -943,7 +968,7 @@ function renderInventoryScreen() {
     const item = hotbarSlots[i];
     renderMcSlot(
       hotbarGrid,
-      item ? makeSlotItem(item.id, item.label, gameMode === 'survival' && typeof item.id === 'number' ? getBlockInventoryCount(item.id) : 1, item.color) : null,
+      item ? makeSlotItem(item.id, item.label, gameMode === 'survival' && typeof item.id === 'number' ? getBlockInventoryCount(item.id) : 1, typeof item.id === 'number' ? getBlockDisplayColor(item.id) : item.color) : null,
       `hotbar-${i}`,
       () => selectHotbar(i)
     );
@@ -1224,8 +1249,9 @@ function buildHotbar() {
     const item = hotbarSlots[i];
     const slot = document.createElement('div');
     slot.className = 'slot' + (i === hotbarIndex ? ' selected' : '');
+    const itemColor = item && typeof item.id === 'number' ? getBlockDisplayColor(item.id) : item?.color;
     slot.innerHTML = item
-      ? `<span class="key">${i + 1}</span><span class="swatch" style="background:${item.color}"></span><span class="name">${item.label}</span><span class="count">${gameMode === 'survival' && typeof item.id === 'number' ? getBlockInventoryCount(item.id) : '?'}</span>`
+      ? `<span class="key">${i + 1}</span><span class="swatch" style="background:${itemColor}"></span><span class="name">${item.label}</span><span class="count">${gameMode === 'survival' && typeof item.id === 'number' ? getBlockInventoryCount(item.id) : '?'}</span>`
       : `<span class="key">${i + 1}</span><span class="name">?</span><span class="count"></span>`;
     slot.addEventListener('click', () => selectHotbar(i));
     bar.appendChild(slot);
@@ -1406,6 +1432,44 @@ function setupVisualSettingsUI() {
     if (world) rebuildAllChunks();
     saveGameState(true);
   });
+  renderBlockColorSettingsUI();
+}
+
+function renderBlockColorSettingsUI() {
+  const box = document.getElementById('block-color-settings');
+  if (!box) return;
+  box.innerHTML = '';
+  HOTBAR_BLOCKS.forEach((block) => {
+    const label = document.createElement('label');
+    label.textContent = block.label;
+    const input = document.createElement('input');
+    input.type = 'color';
+    input.value = getBlockDisplayColor(block.id);
+    input.addEventListener('input', () => {
+      blockColorOverrides[block.id] = input.value.toLowerCase();
+      applyBlockColorOverrides();
+      rebuildAllChunks();
+      buildHotbar();
+      if (inventoryOpen) renderInventoryScreen();
+      saveGameState(true);
+    });
+    box.appendChild(label);
+    box.appendChild(input);
+  });
+
+  const reset = document.createElement('button');
+  reset.type = 'button';
+  reset.textContent = '色をリセット';
+  reset.addEventListener('click', () => {
+    blockColorOverrides = {};
+    applyBlockColorOverrides();
+    renderBlockColorSettingsUI();
+    rebuildAllChunks();
+    buildHotbar();
+    if (inventoryOpen) renderInventoryScreen();
+    saveGameState(true);
+  });
+  box.appendChild(reset);
 }
 
 function setupTouchHoldButton(id, actionId) {
@@ -1657,7 +1721,9 @@ function setupChatUI() {
 function regenerate(presetKey, seed = null, savedState = null, shouldSave = true) {
   currentPreset = presetKey;
   currentSeed = seed ?? ((Math.random() * 0xffffffff) >>> 0);
+  if (savedState) blockColorOverrides = normalizeBlockColors(savedState.blockColors);
   world = generateWorld(presetKey, currentSeed);
+  applyBlockColorOverrides();
   rebuildAllChunks();
   player.spawn(world);
   if (savedState) restorePlayerState(savedState);
@@ -1666,6 +1732,7 @@ function regenerate(presetKey, seed = null, savedState = null, shouldSave = true
   resetPlayerHp();
   if (savedState) restorePlayerState(savedState);
   updateHudMode();
+  renderBlockColorSettingsUI();
   document.querySelectorAll('#presets button').forEach((btn) => {
     btn.classList.toggle('active', btn.dataset.preset === presetKey);
   });
