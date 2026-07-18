@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>ブロックワールド — マイクラ風3D</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #000; touch-action: none; }
+  body { font-family: "Segoe UI", "Hiragino Sans", "Meiryo", sans-serif; user-select: none; }
+  #game { display: block; width: 100%; height: 100%; }
+
+  /* 左上パネル */
+  #panel {
+    position: fixed; inset: 0; z-index: 29;
+    width: 100vw; height: 100vh;
+    padding: 18px 0 64px 69px;
+    background:
+      linear-gradient(rgba(0,0,0,0.04), rgba(0,0,0,0.10)),
+      url("assets/menu-background.png") center / cover no-repeat;
+    color: #000;
+    font-size: 13px;
+    overflow-y: auto;
+  }
+  #panel h1 {
+    width: min(813px, calc(100vw - 140px)); min-height: 164px;
+    margin: 0 0 110px 0;
+    display: flex; align-items: center; justify-content: center;
+    background: #202abd; color: #000;
+    border: 20px solid #ff4a1f;
+    font-size: clamp(32px, 3.2vw, 44px); font-weight: 400;
+    letter-spacing: 1px; text-align: center; text-shadow: none;
+  }
+  #panel h2 { font-size: 20px; margin: 22px 0 9px; color: #fff; text-shadow: 2px 2px 0 #000; }
+  #panel.hidden { display: none; }
+  #panel > h2,
+  #panel > select,
+  #panel > div,
+  #panel > button {
+    width: min(830px, calc(100vw - 140px));
+  }
+  #panel:not(.settings-open) > h2,
+  #panel:not(.settings-open) > select,
+  #panel:not(.settings-open) > #key-config,
+  #panel:not(.settings-open) > #survival-section,
+  #panel:not(.settings-open) > #presets,
+  #panel:not(.settings-open) > #btn-regen,
+  #panel:not(.settings-open) > #help {
+    display: none;
+  }
+  #panel.world-select-open > .menu-row,
+  #panel.world-select-open > h1,
+  #panel.world-select-open > h2,
+  #panel.world-select-open > select,
+  #panel.world-select-open > #key-config,
+  #panel.world-select-open > #survival-section,
+  #panel.world-select-open > #presets,
+  #panel.world-select-open > #btn-regen,
+  #panel.world-select-open > #help {
+    display: none;
+  }
+  #panel.pause-open {
+    background: rgba(0, 0, 0, 0.18);
+    backdrop-filter: blur(2px);
+  }
+  #panel.pause-open > h1 { margin-bottom: 64px; }
+  #panel.pause-open #btn-resume { display: block; }
+  #btn-exit { display: none; }
+  #panel.pause-open #btn-exit { display: block; }
+  .menu-row {
+    display: flex; flex-direction: column;
+    gap: 88px; margin: 0 0 36px 3px;
+    width: min(830px, calc(100vw - 140px));
+  }
+  .mc-menu-button {
+    width: 100%; height: 100px; padding: 0 18px; cursor: pointer;
+    background: #202abd; color: #000;
+    border: 0; border-radius: 0; box-shadow: none;
+    font-size: clamp(32px, 3vw, 42px); font-weight: 400;
+    text-align: center; text-shadow: none;
+  }
+  .mc-menu-button:hover { filter: brightness(1.15); }
+  #presets { display: flex; flex-wrap: wrap; gap: 5px; }
+  #presets button, #btn-regen, .tool-chip {
+    padding: 5px 9px; font-size: 12px; cursor: pointer;
+    background: rgba(32,42,189,0.92); color: #fff;
+    border: 1px solid rgba(255,255,255,0.35); border-radius: 6px;
+  }
+  #presets button:hover, #btn-regen:hover, .tool-chip:hover { filter: brightness(1.15); }
+  #presets button.active { background: #4f8f3a; border-color: #7fce62; }
+  #btn-regen { margin-top: 6px; width: 100%; }
+
+  #game-mode-select {
+    width: 100%; padding: 7px 9px;
+    background: rgba(32,42,189,0.92); color: #fff;
+    border: 1px solid rgba(255,255,255,0.35); border-radius: 6px;
+  }
+  #key-config {
+    display: grid; grid-template-columns: 1fr 82px; gap: 5px 7px; align-items: center;
+    padding: 10px; background: rgba(0,0,0,0.48); color: #fff;
+  }
+  #key-config .key-label { font-size: 11px; color: #e8eef7; }
+  #key-config button {
+    padding: 4px 6px; min-height: 25px;
+    background: rgba(32,42,189,0.92); color: #fff;
+    border: 1px solid rgba(255,255,255,0.35); border-radius: 6px;
+    font-size: 11px;
+  }
+  #key-config button.listening {
+    background: #725c28; border-color: #ffd75e; color: #fff7d0;
+  }
+  #world-select {
+    display: none;
+    width: min(980px, calc(100vw - 140px));
+    margin-left: 3px;
+  }
+  #panel.world-select-open #world-select { display: block; }
+  #world-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 16px;
+    align-items: start;
+  }
+  .world-card {
+    min-height: 120px;
+    padding: 14px;
+    cursor: pointer;
+    background: rgba(32, 42, 189, 0.94);
+    color: #000;
+    border: 0;
+    font-size: 20px;
+    text-align: left;
+  }
+  .world-card.add-world {
+    width: 120px;
+    min-height: 120px;
+    font-size: 68px;
+    line-height: 1;
+    text-align: center;
+  }
+  .world-card small {
+    display: block;
+    margin-top: 10px;
+    font-size: 12px;
+  }
+  #survival-section { display: none; }
+  #survival-section.active { display: block; }
+  #inventory-grid, #resource-grid, .kit-grid {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px;
+  }
+  #inventory-grid .item, #resource-grid .item, #armor-list .item, .kit-grid .item {
+    min-height: 32px; padding: 5px;
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.16); border-radius: 6px;
+    font-size: 11px; line-height: 1.35;
+  }
+  #inventory-grid .count, #resource-grid .count, .kit-grid .count { display: block; color: #ffd75e; font-weight: 700; }
+  .kit-title { margin: 7px 0 4px; font-size: 11px; color: #ffd75e; }
+  #hp-panel {
+    padding: 7px;
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.16); border-radius: 6px;
+  }
+  #hp-hearts { color: #ff6b6b; font-size: 15px; letter-spacing: 1px; }
+  #hp-bar {
+    height: 7px; margin-top: 5px; overflow: hidden;
+    background: rgba(0,0,0,0.35); border-radius: 999px;
+  }
+  #hp-fill { width: 100%; height: 100%; background: #ff5c5c; }
+  #hp-label { margin-top: 4px; font-size: 11px; color: #cfd8e4; }
+  #survival-hud {
+    position: fixed; left: 50%; bottom: 92px; transform: translateX(-50%);
+    z-index: 11; display: none; min-width: 210px; padding: 8px 10px;
+    background: rgba(20, 24, 34, 0.74); color: #eef2f7;
+    border: 2px solid rgba(255,255,255,0.18); border-radius: 8px;
+    text-align: center; pointer-events: none;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.75);
+  }
+  #survival-hud.active { display: block; }
+  #hud-hp-hearts { color: #ff6b6b; font-size: 16px; letter-spacing: 1px; }
+  #hud-hp-bar {
+    height: 7px; margin-top: 5px; overflow: hidden;
+    background: rgba(0,0,0,0.35); border-radius: 999px;
+  }
+  #hud-hp-fill { width: 100%; height: 100%; background: #ff5c5c; }
+  #hud-hp-label { margin-top: 3px; font-size: 11px; color: #cfd8e4; }
+  #tool-list { display: flex; flex-wrap: wrap; gap: 5px; }
+  .tool-chip.selected { background: #5a7b3c; border-color: #9fd08a; }
+  #armor-list { display: grid; grid-template-columns: repeat(2, 1fr); gap: 5px; }
+  #crosshair {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    z-index: 5; pointer-events: none; color: rgba(255,255,255,0.9);
+    font-size: 20px; text-shadow: 0 0 3px rgba(0,0,0,0.8);
+  }
+
+  /* ホットバー */
+  #hotbar {
+    position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%);
+    z-index: 10; display: flex; gap: 4px; max-width: calc(100vw - 20px);
+  }
+  #hotbar .slot {
+    width: 48px; padding: 5px 0 4px; text-align: center; cursor: pointer;
+    background: rgba(20, 24, 34, 0.78); color: #dfe6ee;
+    border: 2px solid rgba(255,255,255,0.22); border-radius: 8px;
+    font-size: 10px; line-height: 1.3;
+  }
+  #hotbar .slot.selected { border-color: #ffd75e; background: rgba(60, 60, 30, 0.8); }
+  #hotbar .key { display: block; font-size: 9px; color: #99a3b1; }
+  #hotbar .count { display: block; font-size: 9px; color: #ffd75e; }
+  #hotbar .swatch {
+    display: block; width: 20px; height: 20px; margin: 2px auto;
+    border: 1px solid rgba(0,0,0,0.5); border-radius: 3px;
+    image-rendering: pixelated;
+  }
+
+  #inventory-screen {
+    position: fixed; inset: 0; z-index: 30; display: none;
+    align-items: center; justify-content: center;
+    background: rgba(0,0,0,0.35); color: #eef2f7;
+  }
+  #inventory-screen.open { display: flex; }
+  #inventory-window {
+    width: min(930px, calc(100vw - 28px)); padding: 14px;
+    background: rgba(24, 28, 36, 0.96);
+    border: 3px solid rgba(255,255,255,0.24); border-radius: 8px;
+    box-shadow: 0 18px 50px rgba(0,0,0,0.5);
+  }
+  #inventory-window h2 {
+    margin-bottom: 10px; font-size: 15px; color: #ffd75e;
+  }
+  #inventory-layout {
+    display: grid; grid-template-columns: 250px 1fr; gap: 14px; align-items: start;
+  }
+  #inventory-layout.survival-layout { grid-template-columns: 1fr; }
+  #creative-catalog {
+    display: none; max-height: min(560px, calc(100vh - 115px)); overflow-y: auto;
+    padding: 8px; background: rgba(0,0,0,0.22);
+    border: 2px solid rgba(255,255,255,0.16); border-radius: 6px;
+  }
+  #creative-catalog.active { display: block; }
+  #creative-catalog-grid { grid-template-columns: repeat(4, 46px); }
+  #inventory-main-panel { min-width: 0; }
+  #inventory-top {
+    display: grid; grid-template-columns: 132px 1fr 150px; gap: 14px; align-items: start;
+    margin-bottom: 12px;
+  }
+  #player-preview {
+    height: 156px; display: flex; align-items: center; justify-content: center;
+    background: rgba(0,0,0,0.26); border: 2px solid rgba(255,255,255,0.18); border-radius: 6px;
+    font-size: 42px;
+  }
+  .inventory-label {
+    margin: 8px 0 5px; font-size: 11px; color: #b8c2d0;
+  }
+  .slot-grid { display: grid; gap: 4px; }
+  #armor-grid { grid-template-columns: repeat(2, 46px); }
+  #craft-grid { grid-template-columns: repeat(2, 46px); }
+  #main-inventory-grid { grid-template-columns: repeat(9, 46px); }
+  #inventory-hotbar-grid { grid-template-columns: repeat(9, 46px); }
+  .mc-slot {
+    position: relative; width: 46px; height: 46px; padding: 3px;
+    background: #8b8f98; border: 2px solid #2f333a;
+    box-shadow: inset 2px 2px 0 rgba(255,255,255,0.25), inset -2px -2px 0 rgba(0,0,0,0.35);
+    color: #111; font-size: 9px; line-height: 1.05; overflow: hidden;
+  }
+  .mc-slot .swatch {
+    width: 18px; height: 18px; margin-bottom: 2px;
+    border: 1px solid rgba(0,0,0,0.45);
+  }
+  .mc-slot .count {
+    position: absolute; right: 3px; bottom: 2px;
+    color: #fff; font-size: 12px; font-weight: 800;
+    text-shadow: 1px 1px 0 #000;
+  }
+  .mc-slot.selected { outline: 3px solid #ffd75e; outline-offset: -3px; }
+  .mc-slot.drag-over { outline: 3px solid #7fceff; outline-offset: -3px; }
+  .craft-arrow {
+    display: flex; align-items: center; justify-content: center;
+    color: #cfd8e4; font-size: 24px;
+  }
+  #inventory-close {
+    float: right; padding: 3px 8px;
+    background: #3a4356; color: #eef2f7;
+    border: 1px solid rgba(255,255,255,0.25); border-radius: 5px;
+  }
+
+  #chat-panel {
+    position: fixed; right: 12px; bottom: 92px; z-index: 13;
+    width: 320px; max-width: calc(100vw - 24px);
+    background: rgba(20, 24, 34, 0.82); color: #eef2f7;
+    border: 2px solid rgba(255,255,255,0.16); border-radius: 8px;
+    backdrop-filter: blur(4px); overflow: hidden;
+  }
+  #chat-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 7px 8px; background: rgba(0,0,0,0.22); font-size: 12px;
+  }
+  #chat-header button {
+    padding: 3px 7px; background: #3a4356; color: #eef2f7;
+    border: 1px solid rgba(255,255,255,0.25); border-radius: 5px;
+    font-size: 11px;
+  }
+  #chat-log {
+    height: 128px; overflow-y: auto; padding: 8px;
+    font-size: 12px; line-height: 1.35;
+  }
+  #chat-log .msg { margin-bottom: 5px; }
+  #chat-log .name { color: #9fd08a; font-weight: 700; }
+  #chat-form { display: grid; grid-template-columns: 1fr 52px; gap: 5px; padding: 8px; }
+  #chat-form input {
+    min-width: 0; padding: 5px 7px;
+    background: #2d3444; color: #eef2f7;
+    border: 1px solid rgba(255,255,255,0.22); border-radius: 5px;
+  }
+  #allowed-list { margin-top: 5px; color: #ffd75e; overflow-wrap: anywhere; }
+
+  /* クリックで開始オーバーレイ */
+  #overlay {
+    position: fixed; inset: 0; z-index: 8; display: flex;
+    align-items: center; justify-content: center; pointer-events: none;
+  }
+  #overlay .msg {
+    padding: 14px 26px; background: rgba(20, 24, 34, 0.85); color: #fff;
+    border: 2px solid rgba(255,255,255,0.25); border-radius: 10px;
+    font-size: 15px; text-align: center; line-height: 1.6;
+  }
+
+  /* 水中エフェクト */
+  #water-overlay {
+    position: fixed; inset: 0; z-index: 4; display: none; pointer-events: none;
+    background: rgba(30, 90, 190, 0.35);
+  }
+
+  #touch-controls {
+    position: fixed; inset: 0; z-index: 12; display: none;
+    pointer-events: none; touch-action: none;
+  }
+  #look-pad {
+    position: absolute; top: 0; right: 0; width: 58%; height: 100%;
+    pointer-events: auto; touch-action: none;
+  }
+  #move-stick {
+    position: absolute; left: max(20px, env(safe-area-inset-left)); bottom: max(28px, env(safe-area-inset-bottom));
+    width: 132px; height: 132px; border-radius: 50%;
+    background: rgba(18, 24, 34, 0.46);
+    border: 2px solid rgba(255,255,255,0.22);
+    pointer-events: auto; touch-action: none;
+  }
+  #move-knob {
+    position: absolute; left: 41px; top: 41px;
+    width: 50px; height: 50px; border-radius: 50%;
+    background: rgba(238,242,247,0.78);
+    border: 2px solid rgba(0,0,0,0.25);
+  }
+  #touch-buttons {
+    position: absolute; right: max(18px, env(safe-area-inset-right)); bottom: max(26px, env(safe-area-inset-bottom));
+    display: grid; grid-template-columns: repeat(3, 58px); gap: 8px;
+    pointer-events: auto; touch-action: none;
+  }
+  .touch-btn {
+    width: 58px; height: 52px;
+    background: rgba(20, 24, 34, 0.72); color: #eef2f7;
+    border: 2px solid rgba(255,255,255,0.22); border-radius: 10px;
+    font-size: 12px; font-weight: 700;
+  }
+  .touch-btn:active, .touch-btn.active {
+    background: rgba(94, 119, 65, 0.88); border-color: #9fd08a;
+  }
+  #btn-touch-break { grid-column: 1; }
+  #btn-touch-place { grid-column: 2; }
+  #btn-touch-jump { grid-column: 3; }
+  #btn-touch-sprint { grid-column: 1; }
+  #btn-touch-fly { grid-column: 2; }
+  #btn-touch-shot { grid-column: 3; }
+  #btn-touch-fullscreen { grid-column: 2; }
+  #btn-touch-inventory { grid-column: 1; }
+
+  @media (pointer: coarse), (max-width: 900px) {
+    #touch-controls { display: block; }
+    #overlay { display: none; }
+    #panel { width: 100vw; font-size: 12px; padding-top: max(18px, env(safe-area-inset-top)); }
+    #hud { top: max(10px, env(safe-area-inset-top)); right: max(10px, env(safe-area-inset-right)); }
+    #hotbar { bottom: max(170px, calc(env(safe-area-inset-bottom) + 150px)); transform: translateX(-50%) scale(0.9); transform-origin: bottom center; }
+    #chat-panel { right: 10px; bottom: max(250px, calc(env(safe-area-inset-bottom) + 230px)); width: 290px; }
+  }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="panel">
+  <h1>ブロックワールド</h1>
+  <div class="menu-row">
+    <button id="btn-resume" class="mc-menu-button" type="button">プレイ</button>
+    <button id="btn-settings" class="mc-menu-button" type="button">設定</button>
+    <button id="btn-exit" class="mc-menu-button" type="button">終了</button>
+  </div>
+
+  <div id="world-select">
+    <div id="world-list"></div>
+  </div>
+
+  <h2>ゲームモード</h2>
+  <select id="game-mode-select">
+    <option value="creative">クリエイティブモード</option>
+    <option value="survival">サバイバルモード</option>
+  </select>
+
+  <h2>キーコンフィグ</h2>
+  <div id="key-config"></div>
+
+  <div id="survival-section">
+    <h2>HP</h2>
+    <div id="hp-panel">
+      <div id="hp-hearts"></div>
+      <div id="hp-bar"><div id="hp-fill"></div></div>
+      <div id="hp-label"></div>
+    </div>
+    <h2>インベントリー</h2>
+    <div id="inventory-grid"></div>
+    <h2>資源アイテム</h2>
+    <div id="resource-grid"></div>
+    <h2>ツール</h2>
+    <div id="tool-list"></div>
+    <h2>装備</h2>
+    <div id="armor-list"></div>
+
+  </div>
+
+  <h2>場所を選ぶ</h2>
+  <div id="presets"></div>
+  <button id="btn-regen">🎲 同じ場所を再生成</button>
+
+  <div id="help">
+    <b>WASD</b> 移動 / <b>マウス</b> 視点 / <b>Space</b> ジャンプ<br>
+    <b>左Shift</b> ダッシュ / <b>F</b> 飛行切替(Space上昇・Shift下降)<br>
+    <b>左クリック</b> 壊す / <b>右クリック</b> 置く<br>
+    <b>1〜9</b> ブロック選択 / <b>P</b> スクリーンショット<br>
+    <b>Esc</b> でマウス解除(メニュー操作)
+  </div>
+</div>
+
+<div id="hud">
+  <div id="hud-pos"></div>
+  <div id="hud-mode"></div>
+</div>
+
+<div id="chat-panel">
+  <div id="chat-header">
+    <span>チャット</span>
+    <div>
+      <button id="btn-chat-collapse" type="button">最小化</button>
+    </div>
+  </div>
+  <div id="chat-log"></div>
+  <form id="chat-form">
+    <input id="chat-input" type="text" placeholder="メッセージ">
+    <button type="submit">送信</button>
+  </form>
+
+</div>
+
+<div id="crosshair">+</div>
+<div id="survival-hud">
+  <div id="hud-hp-hearts"></div>
+  <div id="hud-hp-bar"><div id="hud-hp-fill"></div></div>
+  <div id="hud-hp-label"></div>
+</div>
+<div id="hotbar"></div>
+<div id="water-overlay"></div>
+<div id="inventory-screen">
+  <div id="inventory-window">
+    <button id="inventory-close" type="button">閉じる</button>
+    <h2>インベントリー</h2>
+    <div id="inventory-layout">
+      <div id="creative-catalog">
+        <div class="inventory-label">クリエイティブ</div>
+        <div id="creative-catalog-grid" class="slot-grid"></div>
+      </div>
+      <div id="inventory-main-panel">
+        <div id="inventory-top">
+          <div>
+            <div class="inventory-label">装備</div>
+            <div id="armor-grid" class="slot-grid"></div>
+            <div class="inventory-label">オフハンド</div>
+            <div id="offhand-slot" class="slot-grid"></div>
+          </div>
+          <div id="player-preview">⛏</div>
+          <div>
+            <div class="inventory-label">クラフト</div>
+            <div style="display:grid; grid-template-columns:auto 32px 46px; gap:8px; align-items:center;">
+              <div id="craft-grid" class="slot-grid"></div>
+              <div class="craft-arrow">→</div>
+              <div id="craft-result"></div>
+            </div>
+          </div>
+        </div>
+        <div class="inventory-label">持ち物</div>
+        <div id="main-inventory-grid" class="slot-grid"></div>
+        <div class="inventory-label">ホットバー</div>
+        <div id="inventory-hotbar-grid" class="slot-grid"></div>
+      </div>
+    </div>
+  </div>
+</div>
+<div id="touch-controls" aria-hidden="true">
+  <div id="look-pad"></div>
+  <div id="move-stick"><div id="move-knob"></div></div>
+  <div id="touch-buttons">
+    <button class="touch-btn" id="btn-touch-break" type="button">壊す</button>
+    <button class="touch-btn" id="btn-touch-place" type="button">置く</button>
+    <button class="touch-btn" id="btn-touch-jump" type="button">ジャンプ</button>
+    <button class="touch-btn" id="btn-touch-sprint" type="button">ダッシュ</button>
+    <button class="touch-btn" id="btn-touch-fly" type="button">飛行</button>
+    <button class="touch-btn" id="btn-touch-shot" type="button">撮影</button>
+    <button class="touch-btn" id="btn-touch-inventory" type="button">持物</button>
+    <button class="touch-btn" id="btn-touch-fullscreen" type="button">全画面</button>
+  </div>
+</div>
+
+<div id="overlay">
+  <div class="msg">???????????<br><small>????? <b>Esc</b> ??????????</small></div>
+</div>
+
+<script src="libs/three.min.js"></script>
+<script src="js/noise.js"></script>
+<script src="js/blocks.js"></script>
+<script src="js/world.js"></script>
+<script src="js/player.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>

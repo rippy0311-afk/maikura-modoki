@@ -1,0 +1,1812 @@
+'use strict';
+
+/* ============ 基本セットアップ ============ */
+const canvas = document.getElementById('game');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, preserveDrawingBuffer: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+
+const SKY_COLOR = 0x87ceeb;
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(SKY_COLOR);
+scene.fog = new THREE.Fog(SKY_COLOR, 90, 260);
+
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 600);
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+/* ============ テクスチャ & マテリアル ============ */
+const atlasTexture = new THREE.CanvasTexture(makeAtlasCanvas());
+atlasTexture.magFilter = THREE.NearestFilter;
+atlasTexture.minFilter = THREE.NearestFilter;
+atlasTexture.generateMipmaps = false;
+
+const opaqueMaterial = new THREE.MeshBasicMaterial({ map: atlasTexture, vertexColors: true });
+const waterMaterial = new THREE.MeshBasicMaterial({
+  map: atlasTexture, vertexColors: true,
+  transparent: true, opacity: 0.78, depthWrite: false, side: THREE.DoubleSide,
+});
+
+/* ============ ワールドとチャンクメッシュ ============ */
+let world = null;
+let currentPreset = 'plains';
+let currentSeed = 0;
+const chunkMeshes = new Map(); // "cx,cz" -> { opaque: Mesh|null, water: Mesh|null }
+
+function makeGeometry(d) {
+  if (d.positions.length === 0) return null;
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(d.positions, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(d.uvs, 2));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(d.colors, 3));
+  g.setIndex(d.indices);
+  return g;
+}
+
+function disposeEntry(entry) {
+  for (const key of ['opaque', 'water']) {
+    const mesh = entry[key];
+    if (mesh) {
+      scene.remove(mesh);
+      mesh.geometry.dispose();
+    }
+  }
+}
+
+function rebuildChunk(cx, cz) {
+  const key = cx + ',' + cz;
+  const old = chunkMeshes.get(key);
+  if (old) disposeEntry(old);
+
+  const data = buildChunkMeshData(world, cx, cz);
+  const entry = { opaque: null, water: null };
+
+  const og = makeGeometry(data.opaque);
+  if (og) {
+    entry.opaque = new THREE.Mesh(og, opaqueMaterial);
+    scene.add(entry.opaque);
+  }
+  const wg = makeGeometry(data.water);
+  if (wg) {
+    entry.water = new THREE.Mesh(wg, waterMaterial);
+    entry.water.renderOrder = 1;
+    scene.add(entry.water);
+  }
+  chunkMeshes.set(key, entry);
+}
+
+function rebuildAllChunks() {
+  for (const entry of chunkMeshes.values()) disposeEntry(entry);
+  chunkMeshes.clear();
+  const nx = Math.ceil(world.sx / CHUNK);
+  const nz = Math.ceil(world.sz / CHUNK);
+  for (let cz = 0; cz < nz; cz++) {
+    for (let cx = 0; cx < nx; cx++) rebuildChunk(cx, cz);
+  }
+}
+
+// ブロック編集後、隣接チャンクの境界も含めて再構築
+function rebuildAround(x, y, z) {
+  const cx = Math.floor(x / CHUNK), cz = Math.floor(z / CHUNK);
+  const set = new Set([cx + ',' + cz]);
+  if (x % CHUNK === 0 && cx > 0) set.add((cx - 1) + ',' + cz);
+  if (x % CHUNK === CHUNK - 1 && (cx + 1) * CHUNK < world.sx) set.add((cx + 1) + ',' + cz);
+  if (z % CHUNK === 0 && cz > 0) set.add(cx + ',' + (cz - 1));
+  if (z % CHUNK === CHUNK - 1 && (cz + 1) * CHUNK < world.sz) set.add(cx + ',' + (cz + 1));
+  for (const key of set) {
+    const [a, b] = key.split(',').map(Number);
+    rebuildChunk(a, b);
+  }
+}
+
+function rebuildRegion(x0, z0, x1, z1) {
+  const minCx = Math.max(0, Math.floor(Math.min(x0, x1) / CHUNK));
+  const maxCx = Math.min(Math.ceil(world.sx / CHUNK) - 1, Math.floor(Math.max(x0, x1) / CHUNK));
+  const minCz = Math.max(0, Math.floor(Math.min(z0, z1) / CHUNK));
+  const maxCz = Math.min(Math.ceil(world.sz / CHUNK) - 1, Math.floor(Math.max(z0, z1) / CHUNK));
+  for (let cz = minCz; cz <= maxCz; cz++) {
+    for (let cx = minCx; cx <= maxCx; cx++) rebuildChunk(cx, cz);
+  }
+}
+
+/* ============ 雲 ============ */
+const cloudGroup = new THREE.Group();
+{
+  const cloudMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.82 });
+  const rand = mulberry32(777);
+  for (let i = 0; i < 22; i++) {
+    const w = 10 + rand() * 18, d = 8 + rand() * 14;
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, 2.2, d), cloudMat);
+    mesh.position.set(rand() * WORLD_SX * 1.6 - WORLD_SX * 0.3, 84 + rand() * 8, rand() * WORLD_SZ * 1.6 - WORLD_SZ * 0.3);
+    cloudGroup.add(mesh);
+  }
+  scene.add(cloudGroup);
+}
+
+/* ============ プレイヤー & 入力 ============ */
+const player = new Player();
+const keys = new Set();
+const touchKeys = new Set();
+let pointerLocked = false;
+let touchPlayActive = false;
+const touchMove = { x: 0, z: 0 };
+let miningHeld = false;
+let miningCooldown = 0;
+const MINING_REPEAT_INTERVAL = 0.11;
+let miningTarget = null;
+let miningProgress = 0;
+let placingHeld = false;
+let placeCooldown = 0;
+let lastPlaceTime = 0;
+const PLACE_COOLDOWN = 0.18;
+let gameMode = 'creative';
+const KEY_BINDINGS = {
+  forward: 'KeyW',
+  back: 'KeyS',
+  left: 'KeyA',
+  right: 'KeyD',
+  jump: 'Space',
+  ascend: 'Space',
+  sprint: 'ShiftLeft',
+  descend: 'ShiftLeft',
+  inventory: 'KeyE',
+  chat: 'Slash',
+  screenshot: 'KeyP',
+};
+const KEY_CONFIG_ITEMS = [
+  { id: 'forward', label: '前へ進む' },
+  { id: 'back', label: '後ろへ下がる' },
+  { id: 'left', label: '左へ移動' },
+  { id: 'right', label: '右へ移動' },
+  { id: 'jump', label: 'ジャンプ' },
+  { id: 'ascend', label: '上昇' },
+  { id: 'sprint', label: 'ダッシュ' },
+  { id: 'descend', label: '下降' },
+  { id: 'inventory', label: 'インベントリー' },
+  { id: 'chat', label: 'チャットを開く' },
+  { id: 'screenshot', label: 'スクリーンショット' },
+];
+let rebindingAction = null;
+let lastKeyTapCode = '';
+let lastKeyTapTime = 0;
+let inventoryOpen = false;
+let openingInventory = false;
+let selectedInventorySlot = 'hotbar-0';
+let selectedInventoryItem = null;
+const chatState = {
+  roomId: Math.random().toString(36).slice(2, 8).toUpperCase(),
+  messages: [],
+  allowed: [],
+  collapsed: false,
+};
+const MAX_HP = 20;
+let playerHp = MAX_HP;
+let damageCooldown = 0;
+let breathTimer = 0;
+let regenTimer = 0;
+const SAVE_COOKIE_NAME = 'block_world_save';
+const WORLD_LIST_STORAGE = 'block_world_worlds';
+let lastSaveTime = 0;
+let activeWorldId = null;
+
+function setSaveCookie(value) {
+  const expires = new Date(Date.now() + 180 * 24 * 60 * 60 * 1000).toUTCString();
+  document.cookie = `${SAVE_COOKIE_NAME}=${value}; expires=${expires}; path=/; SameSite=Lax`;
+}
+
+function getSaveCookie() {
+  return document.cookie
+    .split('; ')
+    .find((row) => row.startsWith(`${SAVE_COOKIE_NAME}=`))
+    ?.slice(SAVE_COOKIE_NAME.length + 1);
+}
+
+function loadSavedGame() {
+  const raw = getSaveCookie() || localStorage.getItem(SAVE_COOKIE_NAME);
+  if (!raw) return null;
+  try {
+    const data = JSON.parse(decodeURIComponent(raw));
+    if (!data || data.version !== 1 || !PRESETS[data.preset]) return null;
+    return data;
+  } catch (err) {
+    console.warn('Invalid saved game state', err);
+    return null;
+  }
+}
+
+function saveGameState(force = false) {
+  if (!world || !player || !activeWorldId) return;
+  const now = performance.now();
+  if (!force && now - lastSaveTime < 2000) return;
+  lastSaveTime = now;
+  const state = makeCurrentState();
+  const encoded = encodeURIComponent(JSON.stringify(state));
+  localStorage.setItem(SAVE_COOKIE_NAME, encoded);
+  setSaveCookie(encoded);
+  updateActiveWorldState(state);
+}
+
+function restorePlayerState(saved) {
+  if (!saved || !world.inBounds(Math.floor(saved.x), Math.floor(saved.y), Math.floor(saved.z))) return false;
+  player.pos = { x: saved.x, y: saved.y, z: saved.z };
+  player.vel = { x: 0, y: 0, z: 0 };
+  player.yaw = saved.yaw;
+  player.pitch = saved.pitch;
+  player.fly = Boolean(saved.fly && saved.mode === 'creative');
+  playerHp = Math.max(1, Math.min(MAX_HP, Number(saved.hp) || MAX_HP));
+  updateHpUI();
+  return true;
+}
+
+function loadWorldList() {
+  try {
+    const list = JSON.parse(localStorage.getItem(WORLD_LIST_STORAGE) || '[]');
+    return Array.isArray(list) ? list.filter((item) => item && item.id && PRESETS[item.preset]) : [];
+  } catch (err) {
+    console.warn('Invalid world list', err);
+    return [];
+  }
+}
+
+function saveWorldList(list) {
+  localStorage.setItem(WORLD_LIST_STORAGE, JSON.stringify(list));
+}
+
+function updateActiveWorldState(state) {
+  if (!activeWorldId) return;
+  const list = loadWorldList();
+  const index = list.findIndex((item) => item.id === activeWorldId);
+  if (index < 0) return;
+  list[index] = { ...list[index], ...state, updatedAt: Date.now() };
+  saveWorldList(list);
+}
+
+function makeCurrentState() {
+  return {
+    version: 1,
+    worldId: activeWorldId,
+    preset: currentPreset,
+    seed: currentSeed,
+    mode: gameMode,
+    hp: playerHp,
+    fly: player.fly,
+    x: Number(player.pos.x.toFixed(3)),
+    y: Number(player.pos.y.toFixed(3)),
+    z: Number(player.pos.z.toFixed(3)),
+    yaw: Number(player.yaw.toFixed(5)),
+    pitch: Number(player.pitch.toFixed(5)),
+    savedAt: Date.now(),
+  };
+}
+
+function randomPresetKey() {
+  const keys = Object.keys(PRESETS).filter((key) => key !== 'flat');
+  return keys[Math.floor(Math.random() * keys.length)] || 'plains';
+}
+
+function renderWorldList() {
+  const box = document.getElementById('world-list');
+  if (!box) return;
+  box.innerHTML = '';
+
+  const add = document.createElement('button');
+  add.type = 'button';
+  add.className = 'world-card add-world';
+  add.textContent = '+';
+  add.addEventListener('click', createRandomWorld);
+  box.appendChild(add);
+
+  loadWorldList().forEach((worldInfo) => {
+    const card = document.createElement('button');
+    card.type = 'button';
+    card.className = 'world-card';
+    const presetLabel = PRESETS[worldInfo.preset]?.label || worldInfo.preset;
+    card.innerHTML = `<b>${worldInfo.name}</b><small>${presetLabel}</small>`;
+    card.addEventListener('click', () => enterWorld(worldInfo));
+    box.appendChild(card);
+  });
+}
+
+function showTitleMenu() {
+  activeWorldId = null;
+  touchPlayActive = false;
+  clearMovementState();
+  if (pointerLocked && document.exitPointerLock) document.exitPointerLock();
+  panel.classList.remove('hidden', 'settings-open', 'world-select-open', 'pause-open');
+  document.getElementById('btn-resume').textContent = 'プレイ';
+  document.getElementById('btn-settings').textContent = '設定';
+  overlay.style.display = 'none';
+}
+
+function showWorldSelect() {
+  panel.classList.remove('hidden', 'settings-open', 'pause-open');
+  panel.classList.add('world-select-open');
+  renderWorldList();
+  overlay.style.display = 'none';
+}
+
+function createRandomWorld() {
+  const list = loadWorldList();
+  const record = {
+    id: `world_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
+    name: `World ${list.length + 1}`,
+    preset: randomPresetKey(),
+    seed: (Math.random() * 0xffffffff) >>> 0,
+    mode: gameMode,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  };
+  list.push(record);
+  saveWorldList(list);
+  enterWorld(record);
+}
+
+function enterWorld(worldInfo) {
+  activeWorldId = worldInfo.id;
+  gameMode = worldInfo.mode === 'survival' ? 'survival' : 'creative';
+  const modeSelect = document.getElementById('game-mode-select');
+  if (modeSelect) modeSelect.value = gameMode;
+  regenerate(worldInfo.preset, worldInfo.seed, worldInfo);
+  resumeGame();
+}
+
+const overlay = document.getElementById('overlay');
+const panel = document.getElementById('panel');
+const hudPos = document.getElementById('hud-pos');
+const hudMode = document.getElementById('hud-mode');
+const waterOverlay = document.getElementById('water-overlay');
+
+function hasTouchControls() {
+  return window.matchMedia('(pointer: coarse), (max-width: 900px)').matches || navigator.maxTouchPoints > 0;
+}
+
+function startTouchPlay() {
+  if (!activeWorldId) {
+    showWorldSelect();
+    return;
+  }
+  touchPlayActive = true;
+  panel.classList.remove('settings-open', 'world-select-open', 'pause-open');
+  panel.classList.add('hidden');
+  overlay.style.display = 'none';
+}
+
+function resumeGame() {
+  if (!activeWorldId) {
+    showWorldSelect();
+    return;
+  }
+  panel.classList.remove('settings-open', 'world-select-open', 'pause-open');
+  if (hasTouchControls()) {
+    startTouchPlay();
+    return;
+  }
+  panel.classList.add('hidden');
+  overlay.style.display = 'none';
+  if (!pointerLocked && canvas.requestPointerLock) canvas.requestPointerLock();
+}
+
+function isUiInputTarget(target) {
+  return ['INPUT', 'SELECT', 'TEXTAREA'].includes(target?.tagName);
+}
+
+function isActionKey(e, actionId) {
+  const binding = KEY_BINDINGS[actionId];
+  if (e.code === binding) return true;
+  if (actionId === 'chat' && binding === 'Slash' && e.key === '/') return true;
+  return false;
+}
+
+function clearMovementState() {
+  keys.clear();
+  touchKeys.clear();
+  touchMove.x = 0;
+  touchMove.z = 0;
+  miningHeld = false;
+  placingHeld = false;
+  clearMiningProgress();
+}
+
+function openPauseMenu() {
+  if (!activeWorldId) {
+    showTitleMenu();
+    return;
+  }
+  touchPlayActive = false;
+  clearMovementState();
+  if (pointerLocked && document.exitPointerLock) document.exitPointerLock();
+  panel.classList.remove('hidden', 'world-select-open', 'settings-open');
+  panel.classList.add('pause-open');
+  document.getElementById('btn-resume').textContent = '再開';
+  document.getElementById('btn-settings').textContent = '設定';
+  overlay.style.display = 'none';
+}
+
+function handleEscapeKey(e) {
+  e.preventDefault();
+
+  if (rebindingAction) {
+    rebindingAction = null;
+    clearMovementState();
+    updateKeyConfigUI();
+    return;
+  }
+
+  if (inventoryOpen) {
+    setInventoryOpen(false);
+    return;
+  }
+
+  if (isUiInputTarget(document.activeElement)) {
+    document.activeElement.blur();
+    if (panel.classList.contains('hidden')) resumeGame();
+    return;
+  }
+
+  if (!panel.classList.contains('hidden')) {
+    if (panel.classList.contains('world-select-open')) showTitleMenu();
+    else if (panel.classList.contains('pause-open')) resumeGame();
+    else resumeGame();
+    return;
+  }
+
+  if (!pointerLocked && !touchPlayActive) {
+    resumeGame();
+    return;
+  }
+
+  openPauseMenu();
+}
+
+canvas.addEventListener('click', () => {
+  if (!pointerLocked && !touchPlayActive) resumeGame();
+});
+
+function openChatInput(prefill = '') {
+  const chatLog = document.getElementById('chat-log');
+  const chatForm = document.getElementById('chat-form');
+  const collapseButton = document.getElementById('btn-chat-collapse');
+  const input = document.getElementById('chat-input');
+  if (!input) return;
+  chatState.collapsed = false;
+  if (chatLog) chatLog.style.display = 'block';
+  if (chatForm) chatForm.style.display = 'grid';
+  if (collapseButton) collapseButton.textContent = '最小化';
+  miningHeld = false;
+  if (pointerLocked && document.exitPointerLock) document.exitPointerLock();
+  input.value = prefill;
+  setTimeout(() => {
+    input.focus();
+    input.setSelectionRange(input.value.length, input.value.length);
+  }, 0);
+}
+document.addEventListener('pointerlockchange', () => {
+  pointerLocked = document.pointerLockElement === canvas;
+  if (!pointerLocked) {
+    miningHeld = false;
+    placingHeld = false;
+    clearMiningProgress();
+  }
+  if (openingInventory || inventoryOpen) {
+    panel.classList.add('hidden');
+    overlay.style.display = 'none';
+    openingInventory = false;
+    return;
+  }
+  if (!pointerLocked && activeWorldId && panel.classList.contains('hidden')) {
+    openPauseMenu();
+    return;
+  }
+  if (!pointerLocked && panel.classList.contains('pause-open')) {
+    overlay.style.display = 'none';
+    return;
+  }
+  panel.classList.toggle('hidden', pointerLocked);
+  overlay.style.display = (pointerLocked || touchPlayActive) ? 'none' : 'flex';
+});
+
+document.addEventListener('mousemove', (e) => {
+  if (!pointerLocked) return;
+  player.yaw -= e.movementX * 0.0024;
+  player.pitch -= e.movementY * 0.0024;
+  player.pitch = Math.max(-1.55, Math.min(1.55, player.pitch));
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.code === 'Escape') {
+    handleEscapeKey(e);
+    return;
+  }
+  if (isUiInputTarget(e.target)) return;
+  if (rebindingAction) {
+    e.preventDefault();
+    KEY_BINDINGS[rebindingAction] = e.code;
+    rebindingAction = null;
+    clearMovementState();
+    updateKeyConfigUI();
+    return;
+  }
+  if (isActionKey(e, 'inventory')) {
+    e.preventDefault();
+    setInventoryOpen(!inventoryOpen);
+    return;
+  }
+  if (isActionKey(e, 'chat')) {
+    e.preventDefault();
+    setInventoryOpen(false);
+    openChatInput(e.key === '/' ? '/' : '');
+    return;
+  }
+  keys.add(e.code);
+  const now = performance.now();
+  if (!e.repeat && e.code === lastKeyTapCode && now - lastKeyTapTime < 280) {
+    toggleFlyMode();
+    lastKeyTapCode = '';
+    lastKeyTapTime = 0;
+  } else if (!e.repeat && e.code !== 'Escape') {
+    lastKeyTapCode = e.code;
+    lastKeyTapTime = now;
+  }
+  if (e.code.startsWith('Digit')) {
+    const n = Number(e.code.slice(5));
+    if (n >= 1 && n <= HOTBAR_SIZE) selectHotbar(n - 1);
+  }
+  if (isActionKey(e, 'screenshot')) saveScreenshot();
+  if (isActionKey(e, 'jump') || isActionKey(e, 'ascend')) e.preventDefault();
+});
+document.addEventListener('keyup', (e) => keys.delete(e.code));
+window.addEventListener('blur', () => {
+  keys.clear();
+  touchKeys.clear();
+  touchMove.x = 0;
+  touchMove.z = 0;
+  miningHeld = false;
+  placingHeld = false;
+  clearMiningProgress();
+});
+
+/* ============ ブロックの破壊・設置 ============ */
+let hotbarIndex = 0;
+let selectedToolIndex = 0;
+const HOTBAR_SIZE = 9;
+const hotbarSlots = Array(HOTBAR_SIZE).fill(null);
+
+const SURVIVAL_TOOLS = [
+  { id: 'pickaxe', label: '鉄のツルハシ', targets: '石・鉱石' },
+  { id: 'axe', label: '鉄の斧', targets: '木材' },
+  { id: 'shovel', label: '鉄のシャベル', targets: '土・砂・雪' },
+  { id: 'hoe', label: '鉄のクワ', targets: '畑づくり' },
+  { id: 'sword', label: '鉄の剣', targets: '戦闘' },
+  { id: 'shears', label: 'ハサミ', targets: '葉' },
+];
+
+const IRON_ARMOR = [
+  '鉄のヘルメット',
+  '鉄のチェストプレート',
+  '鉄のレギンス',
+  '鉄のブーツ',
+];
+
+const survivalInventory = {};
+for (const item of HOTBAR_BLOCKS) survivalInventory[item.id] = 0;
+
+const RESOURCE_ITEMS = [
+  { id: 'wood', label: '木', color: '#8a6238' },
+  { id: 'stone', label: '石', color: '#7d7d7d' },
+  { id: 'coal_ore', label: '石炭鉱石', color: '#2a2a2e' },
+  { id: 'iron_ore', label: '鉄鉱石', color: '#cd8a59' },
+  { id: 'gold_ore', label: '金鉱石', color: '#eec23e' },
+];
+for (const item of RESOURCE_ITEMS) survivalInventory[item.id] = 0;
+
+const RESOURCE_DROPS = {
+  [BLOCK.LOG]: 'wood',
+  [BLOCK.PLANK]: 'wood',
+  [BLOCK.STONE]: 'stone',
+  [BLOCK.COAL_ORE]: 'coal_ore',
+  [BLOCK.IRON_ORE]: 'iron_ore',
+  [BLOCK.GOLD_ORE]: 'gold_ore',
+};
+
+const CUSTOM_BREAK_BLOCKS = [
+  { id: BLOCK.GRASS, label: '草' },
+  { id: BLOCK.DIRT, label: '土' },
+  { id: BLOCK.STONE, label: '石' },
+  { id: BLOCK.SAND, label: '砂' },
+  { id: BLOCK.LOG, label: '原木' },
+  { id: BLOCK.LEAVES, label: '葉' },
+  { id: BLOCK.SNOW, label: '雪' },
+  { id: BLOCK.PLANK, label: '木材' },
+  { id: BLOCK.BRICK, label: 'レンガ' },
+  { id: BLOCK.COAL_ORE, label: '石炭鉱石' },
+  { id: BLOCK.IRON_ORE, label: '鉄鉱石' },
+  { id: BLOCK.GOLD_ORE, label: '金鉱石' },
+  { id: BLOCK.CHEST, label: 'チェスト' },
+  { id: BLOCK.ITEM_NODE, label: 'アイテム鉱石' },
+];
+
+const DRAGON_KIT_CATEGORIES = [
+  {
+    title: '装備',
+    items: [
+      { id: 'diamond_helmet', label: 'ダイヤヘルメット', count: 1 },
+      { id: 'diamond_chestplate', label: 'ダイヤチェスト', count: 1 },
+      { id: 'diamond_leggings', label: 'ダイヤレギンス', count: 1 },
+      { id: 'diamond_boots', label: 'ダイヤブーツ', count: 1 },
+      { id: 'shield', label: '盾', count: 1 },
+      { id: 'elytra', label: 'エリトラ', count: 1 },
+    ],
+  },
+  {
+    title: '武器・道具',
+    items: [
+      { id: 'diamond_sword', label: 'ダイヤの剣', count: 1 },
+      { id: 'bow', label: '弓', count: 1 },
+      { id: 'crossbow', label: 'クロスボウ', count: 1 },
+      { id: 'arrow', label: '矢', count: 64 },
+      { id: 'diamond_pickaxe', label: 'ダイヤツルハシ', count: 1 },
+      { id: 'diamond_axe', label: 'ダイヤの斧', count: 1 },
+    ],
+  },
+  {
+    title: 'バケツ・移動',
+    items: [
+      { id: 'water_bucket', label: '水入りバケツ', count: 2 },
+      { id: 'lava_bucket', label: '溶岩バケツ', count: 1 },
+      { id: 'empty_bucket', label: '空バケツ', count: 1 },
+      { id: 'boat', label: 'ボート', count: 1 },
+      { id: 'building_blocks', label: '足場ブロック', count: 128 },
+      { id: 'ladder', label: 'はしご', count: 32 },
+    ],
+  },
+  {
+    title: 'ネザー系',
+    items: [
+      { id: 'obsidian', label: '黒曜石', count: 14 },
+      { id: 'flint_steel', label: '火打石と打ち金', count: 1 },
+      { id: 'blaze_rod', label: 'ブレイズロッド', count: 8 },
+      { id: 'blaze_powder', label: 'ブレイズパウダー', count: 16 },
+      { id: 'nether_wart', label: 'ネザーウォート', count: 16 },
+      { id: 'soul_sand', label: 'ソウルサンド', count: 8 },
+    ],
+  },
+  {
+    title: 'エンド系',
+    items: [
+      { id: 'ender_pearl', label: 'エンダーパール', count: 16 },
+      { id: 'eye_of_ender', label: 'エンダーアイ', count: 12 },
+      { id: 'ender_chest', label: 'エンダーチェスト', count: 1 },
+      { id: 'chorus_fruit', label: 'コーラスフルーツ', count: 16 },
+      { id: 'end_crystal', label: 'エンドクリスタル', count: 4 },
+      { id: 'dragon_breath', label: 'ドラゴンブレス瓶', count: 4 },
+    ],
+  },
+  {
+    title: 'ポーション・食料',
+    items: [
+      { id: 'brewing_stand', label: '醸造台', count: 1 },
+      { id: 'glass_bottle', label: 'ガラス瓶', count: 6 },
+      { id: 'slow_falling_potion', label: '低速落下ポーション', count: 3 },
+      { id: 'strength_potion', label: '力のポーション', count: 2 },
+      { id: 'healing_potion', label: '治癒ポーション', count: 3 },
+      { id: 'golden_apple', label: '金のリンゴ', count: 8 },
+    ],
+  },
+  {
+    title: 'その他',
+    items: [
+      { id: 'bed', label: 'ベッド', count: 6 },
+      { id: 'torch', label: 'たいまつ', count: 64 },
+      { id: 'compass', label: 'コンパス', count: 1 },
+      { id: 'map', label: '地図', count: 1 },
+      { id: 'crafting_table', label: '作業台', count: 1 },
+      { id: 'furnace', label: 'かまど', count: 1 },
+    ],
+  },
+];
+for (const item of IRON_ARMOR) survivalInventory[item] = 0;
+
+function gameModeLabel() {
+  return gameMode === 'survival' ? 'サバイバル' : 'クリエイティブ';
+}
+
+function resetPlayerHp() {
+  playerHp = MAX_HP;
+  damageCooldown = 0;
+  breathTimer = 0;
+  regenTimer = 0;
+  updateHpUI();
+}
+
+function damagePlayer(amount) {
+  if (gameMode !== 'survival' || damageCooldown > 0) return;
+  playerHp = Math.max(0, playerHp - amount);
+  damageCooldown = 0.6;
+  updateHpUI();
+  if (playerHp <= 0) {
+    player.spawn(world);
+    resetPlayerHp();
+  }
+}
+
+function healPlayer(amount) {
+  if (gameMode !== 'survival' || playerHp >= MAX_HP) return;
+  playerHp = Math.min(MAX_HP, playerHp + amount);
+  updateHpUI();
+}
+
+function updateHpUI() {
+  const fullHearts = Math.ceil(playerHp / 2);
+  const heartsText = '♥'.repeat(fullHearts) + '♡'.repeat(10 - fullHearts);
+  const fillWidth = `${(playerHp / MAX_HP) * 100}%`;
+  const labelText = `${playerHp} / ${MAX_HP}`;
+
+  [
+    ['hp-hearts', 'hp-fill', 'hp-label'],
+    ['hud-hp-hearts', 'hud-hp-fill', 'hud-hp-label'],
+  ].forEach(([heartsId, fillId, labelId]) => {
+    const hearts = document.getElementById(heartsId);
+    const fill = document.getElementById(fillId);
+    const label = document.getElementById(labelId);
+    if (!hearts || !fill || !label) return;
+    hearts.textContent = heartsText;
+    fill.style.width = fillWidth;
+    label.textContent = labelText;
+  });
+}
+
+function updateSurvivalStats(dt) {
+  if (damageCooldown > 0) damageCooldown = Math.max(0, damageCooldown - dt);
+  if (gameMode !== 'survival') return;
+
+  if (player.landedFallSpeed > 13) {
+    damagePlayer(Math.ceil((player.landedFallSpeed - 13) * 0.55));
+    player.landedFallSpeed = 0;
+  }
+
+  const eye = player.eyePos();
+  const headBlock = world.get(Math.floor(eye.x), Math.floor(eye.y), Math.floor(eye.z));
+  if (headBlock === BLOCK.WATER) {
+    breathTimer += dt;
+    if (breathTimer > 7) {
+      damagePlayer(1);
+      breathTimer = 6.2;
+    }
+  } else {
+    breathTimer = Math.max(0, breathTimer - dt * 2);
+  }
+
+  if (player.pos.y < -8) damagePlayer(4);
+
+  if (playerHp < MAX_HP && player.onGround && breathTimer <= 0 && damageCooldown <= 0) {
+    regenTimer += dt;
+    if (regenTimer >= 4) {
+      healPlayer(1);
+      regenTimer = 0;
+    }
+  } else {
+    regenTimer = 0;
+  }
+}
+
+function getBlockInventoryCount(blockId) {
+  return survivalInventory[blockId] || 0;
+}
+
+function getInventoryCount(itemId) {
+  return survivalInventory[itemId] || 0;
+}
+
+function makeSlotItem(id, label, count, color = '#8b8f98') {
+  return { id, label, count, color };
+}
+
+function cloneSlotItem(item, count = 1) {
+  if (!item) return null;
+  return {
+    id: item.id,
+    label: item.label,
+    count,
+    color: item.color || '#8b8f98',
+  };
+}
+
+function getDragonKitItem(id) {
+  return null;
+}
+
+function getCatalogItem(id) {
+  if (typeof MINECRAFT_GENERAL_CATALOG === 'undefined') return null;
+  return MINECRAFT_GENERAL_CATALOG.find((item) => item.id === id) || null;
+}
+
+function getCreativeCatalogItems() {
+  const hotbarItems = HOTBAR_BLOCKS.map((item) => makeSlotItem(item.id, item.label, 1, item.color));
+  const resources = RESOURCE_ITEMS.map((item) => makeSlotItem(item.id, item.label, 1, item.color));
+  const seen = new Set();
+  return hotbarItems.concat(resources).filter((item) => {
+    if (seen.has(item.id)) return false;
+    seen.add(item.id);
+    return true;
+  });
+}
+
+function renderMcSlot(parent, item = null, slotId = '', onSelect = null) {
+  const slot = document.createElement('div');
+  slot.className = 'mc-slot' + (slotId && selectedInventorySlot === slotId ? ' selected' : '');
+  if (slotId) slot.dataset.slotId = slotId;
+  if (item && item.count > 0) {
+    slot.title = item.label;
+    slot.innerHTML = `<div class="swatch" style="background:${item.color}"></div><span>${item.label}</span><span class="count">${item.count > 1 ? item.count : ''}</span>`;
+    slot.draggable = true;
+    slot.addEventListener('dragstart', (e) => {
+      e.dataTransfer.setData('application/json', JSON.stringify(cloneSlotItem(item)));
+      e.dataTransfer.effectAllowed = 'copy';
+    });
+  }
+  if (slotId.startsWith('hotbar-')) {
+    const index = Number(slotId.slice(7));
+    slot.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      slot.classList.add('drag-over');
+    });
+    slot.addEventListener('dragleave', () => slot.classList.remove('drag-over'));
+    slot.addEventListener('drop', (e) => {
+      e.preventDefault();
+      slot.classList.remove('drag-over');
+      const raw = e.dataTransfer.getData('application/json');
+      if (!raw) return;
+      try {
+        hotbarSlots[index] = cloneSlotItem(JSON.parse(raw));
+        selectHotbar(index);
+        buildHotbar();
+        renderInventoryScreen();
+      } catch (err) {
+        console.warn('Invalid dragged item', err);
+      }
+    });
+  }
+  if (onSelect) {
+    slot.addEventListener('click', () => {
+      selectedInventorySlot = slotId;
+      onSelect(item, slotId);
+      renderInventoryScreen();
+    });
+  }
+  parent.appendChild(slot);
+}
+
+function getMainInventoryItems() {
+  const resources = RESOURCE_ITEMS.map((item) => makeSlotItem(
+    item.id,
+    item.label,
+    getInventoryCount(item.id),
+    item.color
+  ));
+  return resources.slice(0, 27);
+}
+
+function renderInventoryScreen() {
+  document.getElementById('inventory-layout').classList.toggle('survival-layout', gameMode !== 'creative');
+  const creativeCatalog = document.getElementById('creative-catalog');
+  const creativeGrid = document.getElementById('creative-catalog-grid');
+  creativeCatalog.classList.toggle('active', gameMode === 'creative');
+  creativeGrid.innerHTML = '';
+  if (gameMode === 'creative') {
+    getCreativeCatalogItems().forEach((item, i) => {
+      renderMcSlot(creativeGrid, item, `creative-${i}`, (selected) => {
+        selectedInventoryItem = selected;
+      });
+    });
+  }
+
+  const armorGrid = document.getElementById('armor-grid');
+  armorGrid.innerHTML = '';
+  IRON_ARMOR.forEach((label, i) => {
+    renderMcSlot(armorGrid, makeSlotItem(`iron_armor_${i}`, label, 0, '#bfc5c9'), `armor-${i}`, () => {});
+  });
+
+  const offhand = document.getElementById('offhand-slot');
+  offhand.innerHTML = '';
+  renderMcSlot(offhand, null, 'offhand-0', () => {});
+
+  const craftGrid = document.getElementById('craft-grid');
+  craftGrid.innerHTML = '';
+  for (let i = 0; i < 4; i++) renderMcSlot(craftGrid, null, `craft-${i}`, () => {});
+  const craftResult = document.getElementById('craft-result');
+  craftResult.innerHTML = '';
+  renderMcSlot(craftResult, null, 'craft-result', () => {});
+
+  const mainGrid = document.getElementById('main-inventory-grid');
+  mainGrid.innerHTML = '';
+  const mainItems = getMainInventoryItems();
+  for (let i = 0; i < 27; i++) renderMcSlot(mainGrid, mainItems[i] || null, `main-${i}`, (item) => {
+    selectedInventoryItem = item;
+  });
+
+  const hotbarGrid = document.getElementById('inventory-hotbar-grid');
+  hotbarGrid.innerHTML = '';
+  for (let i = 0; i < HOTBAR_SIZE; i++) {
+    const item = hotbarSlots[i];
+    renderMcSlot(
+      hotbarGrid,
+      item ? makeSlotItem(item.id, item.label, gameMode === 'survival' && typeof item.id === 'number' ? getBlockInventoryCount(item.id) : 1, item.color) : null,
+      `hotbar-${i}`,
+      () => selectHotbar(i)
+    );
+  }
+}
+
+function setInventoryOpen(open) {
+  const wasOpen = inventoryOpen;
+  inventoryOpen = open;
+  if (inventoryOpen) miningHeld = false;
+  const screen = document.getElementById('inventory-screen');
+  screen.classList.toggle('open', inventoryOpen);
+  if (inventoryOpen) {
+    if (pointerLocked && document.exitPointerLock) {
+      openingInventory = true;
+      document.exitPointerLock();
+    }
+    panel.classList.add('hidden');
+    overlay.style.display = 'none';
+    renderInventoryScreen();
+  } else {
+    openingInventory = false;
+    if (wasOpen) setTimeout(resumeGame, 0);
+  }
+}
+
+function addBlockToInventory(blockId, amount) {
+  if (blockId === BLOCK.AIR || blockId === BLOCK.WATER || blockId === BLOCK.COLOR ||
+      blockId === BLOCK.CHEST || blockId === BLOCK.ITEM_NODE || blockId === BLOCK.BEDROCK) return;
+  survivalInventory[blockId] = getBlockInventoryCount(blockId) + amount;
+  const resourceId = RESOURCE_DROPS[blockId];
+  if (resourceId) survivalInventory[resourceId] = getInventoryCount(resourceId) + amount;
+  updateSurvivalUI();
+  if (inventoryOpen) renderInventoryScreen();
+}
+
+function addItemToInventory(itemId, amount) {
+  survivalInventory[itemId] = getInventoryCount(itemId) + amount;
+  updateSurvivalUI();
+  if (inventoryOpen) renderInventoryScreen();
+}
+
+function collectLootChest(x, y, z) {
+  const items = world.takeLootChest(x, y, z);
+  items.forEach((item) => addItemToInventory(item.id, item.count));
+}
+
+function collectItemNode(x, y, z) {
+  const item = world.takeItemNode(x, y, z);
+  if (!item) return;
+  addItemToInventory(item.id, item.count);
+}
+
+function getSurvivalDropBlockId(blockId) {
+  const selectedTool = getSelectedToolId();
+  const needsPickaxe = [BLOCK.STONE, BLOCK.COAL_ORE, BLOCK.IRON_ORE, BLOCK.GOLD_ORE, BLOCK.BRICK].includes(blockId);
+  if (needsPickaxe && selectedTool !== 'pickaxe') return null;
+  if (blockId === BLOCK.LEAVES && selectedTool !== 'shears') return null;
+  if (blockId === BLOCK.GRASS) return BLOCK.DIRT;
+  return blockId;
+}
+
+function collectMinedDrop(blockId, x, y, z) {
+  if (blockId === BLOCK.CHEST) {
+    collectLootChest(x, y, z);
+  } else if (blockId === BLOCK.ITEM_NODE) {
+    collectItemNode(x, y, z);
+  } else if (gameMode === 'survival') {
+    const dropBlockId = getSurvivalDropBlockId(blockId);
+    if (dropBlockId !== null) addBlockToInventory(dropBlockId, 1);
+  }
+}
+
+function getSelectedCustomItem() {
+  return null;
+}
+
+function getSelectedPlaceBlockId() {
+  const item = hotbarSlots[hotbarIndex];
+  if (!item) return null;
+  return typeof item.id === 'number' ? item.id : null;
+}
+
+function placeSelectedHotbarItem(x, y, z) {
+  const item = hotbarSlots[hotbarIndex];
+  if (!item) return false;
+  const blockId = getSelectedPlaceBlockId();
+  if (blockId !== null) {
+    world.set(x, y, z, blockId);
+    return true;
+  }
+  const catalogItem = getCatalogItem(item.id);
+  if (gameMode === 'creative' && catalogItem && catalogItem.color) {
+    world.setColor(x, y, z, Number.parseInt(catalogItem.color.replace('#', ''), 16));
+    return true;
+  }
+  return false;
+}
+
+function isBreakableBlock(blockId) {
+  return blockId !== BLOCK.AIR && blockId !== BLOCK.WATER && blockId !== BLOCK.BEDROCK;
+}
+
+function blockKey(x, y, z) {
+  return `${x},${y},${z}`;
+}
+
+function getSelectedToolId() {
+  return gameMode === 'survival' ? SURVIVAL_TOOLS[selectedToolIndex]?.id : 'creative';
+}
+
+function getPreferredTool(blockId) {
+  if ([BLOCK.STONE, BLOCK.COAL_ORE, BLOCK.IRON_ORE, BLOCK.GOLD_ORE, BLOCK.BRICK].includes(blockId)) return 'pickaxe';
+  if ([BLOCK.LOG, BLOCK.PLANK].includes(blockId)) return 'axe';
+  if ([BLOCK.DIRT, BLOCK.GRASS, BLOCK.SAND, BLOCK.SNOW].includes(blockId)) return 'shovel';
+  if (blockId === BLOCK.LEAVES) return 'shears';
+  return 'hand';
+}
+
+function getBlockHardness(blockId) {
+  const hardness = {
+    [BLOCK.GRASS]: 0.6,
+    [BLOCK.DIRT]: 0.5,
+    [BLOCK.STONE]: 1.5,
+    [BLOCK.SAND]: 0.5,
+    [BLOCK.LOG]: 2.0,
+    [BLOCK.LEAVES]: 0.2,
+    [BLOCK.SNOW]: 0.1,
+    [BLOCK.PLANK]: 2.0,
+    [BLOCK.BRICK]: 2.0,
+    [BLOCK.COAL_ORE]: 3.0,
+    [BLOCK.IRON_ORE]: 3.0,
+    [BLOCK.GOLD_ORE]: 3.0,
+    [BLOCK.CHEST]: 2.5,
+    [BLOCK.ITEM_NODE]: 3.0,
+  };
+  return hardness[blockId] ?? 1.0;
+}
+
+function getBreakDuration(blockId) {
+  if (gameMode === 'creative') return 0;
+  const preferred = getPreferredTool(blockId);
+  const selected = getSelectedToolId();
+  const toolMultiplier = selected === preferred || preferred === 'hand' ? 0.34 : 1.15;
+  return Math.max(0.12, getBlockHardness(blockId) * toolMultiplier);
+}
+
+function clearMiningProgress() {
+  miningTarget = null;
+  miningProgress = 0;
+  breakBox.visible = false;
+  breakBoxMaterial.opacity = 0;
+}
+
+function updateBreakOverlay(hit, progress) {
+  if (!hit) {
+    breakBox.visible = false;
+    return;
+  }
+  breakBox.visible = true;
+  breakBox.position.set(hit.x + 0.5, hit.y + 0.5, hit.z + 0.5);
+  breakBoxMaterial.opacity = Math.min(0.95, 0.18 + progress * 0.72);
+}
+
+function consumeSelectedBlock() {
+  const item = hotbarSlots[hotbarIndex];
+  if (!item) return false;
+  if (gameMode !== 'survival') return true;
+  if (typeof item.id !== 'number') return false;
+  const blockId = item.id;
+  const count = getBlockInventoryCount(blockId);
+  if (count <= 0) return false;
+  survivalInventory[blockId] = count - 1;
+  updateSurvivalUI();
+  if (inventoryOpen) renderInventoryScreen();
+  buildHotbar();
+  return true;
+}
+
+function interactBlock(button) {
+  const eye = player.eyePos();
+  const dir = player.lookDir();
+  const hit = raycastVoxel(world, eye.x, eye.y, eye.z, dir.x, dir.y, dir.z, 8);
+  if (!hit) return false;
+
+  if (button === 0) {
+    const brokenBlock = world.get(hit.x, hit.y, hit.z);
+    if (!isBreakableBlock(brokenBlock)) return false;
+    collectMinedDrop(brokenBlock, hit.x, hit.y, hit.z);
+    world.set(hit.x, hit.y, hit.z, BLOCK.AIR);
+    rebuildAround(hit.x, hit.y, hit.z);
+    clearMiningProgress();
+    saveGameState(true);
+    return true;
+  }
+
+  if (button === 2) {
+    const now = performance.now();
+    if (now - lastPlaceTime < PLACE_COOLDOWN * 1000) return false;
+    const px = hit.x + hit.nx, py = hit.y + hit.ny, pz = hit.z + hit.nz;
+    const target = world.get(px, py, pz);
+    if (world.inBounds(px, py, pz) &&
+        (target === BLOCK.AIR || target === BLOCK.WATER) &&
+        !player.intersectsBlock(px, py, pz)) {
+      if (!consumeSelectedBlock()) return false;
+      if (!placeSelectedHotbarItem(px, py, pz)) return false;
+      rebuildAround(px, py, pz);
+      lastPlaceTime = now;
+      saveGameState(true);
+      return true;
+    }
+  }
+
+  return false;
+}
+
+document.addEventListener('mousedown', (e) => {
+  if (!pointerLocked) return;
+
+  if (e.button === 0) {
+    miningHeld = true;
+    miningCooldown = 0;
+    clearMiningProgress();
+  } else if (e.button === 2) {
+    placingHeld = true;
+    placeCooldown = PLACE_COOLDOWN;
+    interactBlock(2);
+  }
+});
+document.addEventListener('mouseup', (e) => {
+  if (e.button === 0) {
+    miningHeld = false;
+    clearMiningProgress();
+  } else if (e.button === 2) {
+    placingHeld = false;
+  }
+});
+window.addEventListener('blur', () => {
+  miningHeld = false;
+  placingHeld = false;
+  clearMiningProgress();
+});
+document.addEventListener('contextmenu', (e) => e.preventDefault());
+
+/* ============ 照準ブロックのハイライト ============ */
+const highlightBox = new THREE.LineSegments(
+  new THREE.EdgesGeometry(new THREE.BoxGeometry(1.002, 1.002, 1.002)),
+  new THREE.LineBasicMaterial({ color: 0x111111 })
+);
+highlightBox.visible = false;
+scene.add(highlightBox);
+
+const breakBoxMaterial = new THREE.LineBasicMaterial({ color: 0x000000, transparent: true, opacity: 0 });
+const breakBox = new THREE.LineSegments(
+  new THREE.EdgesGeometry(new THREE.BoxGeometry(1.012, 1.012, 1.012)),
+  breakBoxMaterial
+);
+breakBox.visible = false;
+scene.add(breakBox);
+
+function updateHighlight() {
+  const eye = player.eyePos();
+  const dir = player.lookDir();
+  const hit = raycastVoxel(world, eye.x, eye.y, eye.z, dir.x, dir.y, dir.z, 8);
+  if (hit) {
+    highlightBox.visible = true;
+    highlightBox.position.set(hit.x + 0.5, hit.y + 0.5, hit.z + 0.5);
+  } else {
+    highlightBox.visible = false;
+  }
+}
+
+/* ============ ホットバー UI ============ */
+function buildHotbar() {
+  const bar = document.getElementById('hotbar');
+  bar.innerHTML = '';
+  for (let i = 0; i < HOTBAR_SIZE; i++) {
+    const item = hotbarSlots[i];
+    const slot = document.createElement('div');
+    slot.className = 'slot' + (i === hotbarIndex ? ' selected' : '');
+    slot.innerHTML = item
+      ? `<span class="key">${i + 1}</span><span class="swatch" style="background:${item.color}"></span><span class="name">${item.label}</span><span class="count">${gameMode === 'survival' && typeof item.id === 'number' ? getBlockInventoryCount(item.id) : '?'}</span>`
+      : `<span class="key">${i + 1}</span><span class="name">?</span><span class="count"></span>`;
+    slot.addEventListener('click', () => selectHotbar(i));
+    bar.appendChild(slot);
+  }
+}
+function selectHotbar(i) {
+  hotbarIndex = ((i % HOTBAR_SIZE) + HOTBAR_SIZE) % HOTBAR_SIZE;
+  selectedInventorySlot = `hotbar-${hotbarIndex}`;
+  selectedInventoryItem = hotbarSlots[hotbarIndex];
+  document.querySelectorAll('#hotbar .slot').forEach((el, j) => {
+    el.classList.toggle('selected', j === hotbarIndex);
+  });
+  if (inventoryOpen) renderInventoryScreen();
+}
+
+document.addEventListener('wheel', (e) => {
+  if (!(pointerLocked || touchPlayActive) || inventoryOpen) return;
+  if (Math.abs(e.deltaY) < 1) return;
+  e.preventDefault();
+  selectHotbar(hotbarIndex + (e.deltaY > 0 ? 1 : -1));
+}, { passive: false });
+
+function buildSurvivalUI() {
+  const tools = document.getElementById('tool-list');
+  tools.innerHTML = '';
+  SURVIVAL_TOOLS.forEach((tool, i) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'tool-chip' + (i === selectedToolIndex ? ' selected' : '');
+    btn.title = tool.targets;
+    btn.textContent = tool.label;
+    btn.addEventListener('click', () => {
+      selectedToolIndex = i;
+      updateSurvivalUI();
+    });
+    tools.appendChild(btn);
+  });
+
+  const armor = document.getElementById('armor-list');
+  armor.innerHTML = '';
+  IRON_ARMOR.forEach((label) => {
+    const item = document.createElement('div');
+    item.className = 'item';
+    item.textContent = label;
+    armor.appendChild(item);
+  });
+}
+
+function updateSurvivalUI() {
+  const section = document.getElementById('survival-section');
+  if (section) section.classList.toggle('active', gameMode === 'survival');
+  document.getElementById('survival-hud').classList.toggle('active', gameMode === 'survival');
+  updateHpUI();
+
+  const grid = document.getElementById('inventory-grid');
+  if (grid) {
+    grid.innerHTML = '';
+    HOTBAR_BLOCKS.slice(0, HOTBAR_SIZE).forEach((block) => {
+      const item = document.createElement('div');
+      item.className = 'item';
+      item.innerHTML = `<span>${block.label}</span><span class="count">${getBlockInventoryCount(block.id)}</span>`;
+      grid.appendChild(item);
+    });
+  }
+
+  const resourceGrid = document.getElementById('resource-grid');
+  if (resourceGrid) {
+    resourceGrid.innerHTML = '';
+    RESOURCE_ITEMS.forEach((resource) => {
+      const item = document.createElement('div');
+      item.className = 'item';
+      item.innerHTML = `<span>${resource.label}</span><span class="count">${getInventoryCount(resource.id)}</span>`;
+      resourceGrid.appendChild(item);
+    });
+  }
+
+  document.querySelectorAll('#tool-list .tool-chip').forEach((el, i) => {
+    el.classList.toggle('selected', i === selectedToolIndex);
+  });
+
+  document.querySelectorAll('#hotbar .slot').forEach((el, i) => {
+    const item = hotbarSlots[i];
+    const count = item && typeof item.id === 'number' ? getBlockInventoryCount(item.id) : '';
+    const countEl = el.querySelector('.count');
+    if (countEl) countEl.textContent = item ? (gameMode === 'survival' ? count : '?') : '';
+  });
+  buildHotbar();
+  updateHudMode();
+}
+
+function setGameMode(mode) {
+  gameMode = mode === 'survival' ? 'survival' : 'creative';
+  if (gameMode === 'survival' && player.fly) {
+    player.fly = false;
+    player.vel.y = 0;
+  }
+  if (gameMode === 'survival') resetPlayerHp();
+  updateSurvivalUI();
+  saveGameState(true);
+}
+
+function setupGameModeUI() {
+  const select = document.getElementById('game-mode-select');
+  select.value = gameMode;
+  select.addEventListener('change', () => setGameMode(select.value));
+  buildSurvivalUI();
+  updateSurvivalUI();
+}
+
+function formatKeyCode(code) {
+  const names = {
+    Space: 'Space',
+    ShiftLeft: 'L-Shift',
+    ShiftRight: 'R-Shift',
+    ControlLeft: 'L-Ctrl',
+    ControlRight: 'R-Ctrl',
+    AltLeft: 'L-Alt',
+    AltRight: 'R-Alt',
+    Slash: '/',
+    Backslash: '\\',
+    Enter: 'Enter',
+    ArrowUp: '↑',
+    ArrowDown: '↓',
+    ArrowLeft: '←',
+    ArrowRight: '→',
+  };
+  if (names[code]) return names[code];
+  if (code.startsWith('Key')) return code.slice(3);
+  if (code.startsWith('Digit')) return code.slice(5);
+  return code.replace('Numpad', 'Num ');
+}
+
+function updateKeyConfigUI() {
+  document.querySelectorAll('#key-config button').forEach((btn) => {
+    const action = btn.dataset.action;
+    btn.textContent = rebindingAction === action ? '入力待ち' : formatKeyCode(KEY_BINDINGS[action]);
+    btn.classList.toggle('listening', rebindingAction === action);
+  });
+}
+
+function setupKeyConfigUI() {
+  const box = document.getElementById('key-config');
+  box.innerHTML = '';
+  KEY_CONFIG_ITEMS.forEach((item) => {
+    const label = document.createElement('div');
+    label.className = 'key-label';
+    label.textContent = item.label;
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.dataset.action = item.id;
+    btn.addEventListener('click', () => {
+      rebindingAction = item.id;
+      keys.clear();
+      updateKeyConfigUI();
+    });
+
+    box.appendChild(label);
+    box.appendChild(btn);
+  });
+  updateKeyConfigUI();
+}
+
+
+
+/* ============ ワールド生成・UI ============ */
+function setTouchButtonActive(el, active) {
+  el.classList.toggle('active', active);
+}
+
+function setupTouchHoldButton(id, actionId) {
+  const btn = document.getElementById(id);
+  btn.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    startTouchPlay();
+    touchKeys.add(KEY_BINDINGS[actionId]);
+    setTouchButtonActive(btn, true);
+  });
+  const release = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    touchKeys.delete(KEY_BINDINGS[actionId]);
+    setTouchButtonActive(btn, false);
+  };
+  btn.addEventListener('pointerup', release);
+  btn.addEventListener('pointercancel', release);
+  btn.addEventListener('lostpointercapture', () => {
+    touchKeys.delete(KEY_BINDINGS[actionId]);
+    setTouchButtonActive(btn, false);
+  });
+}
+
+function setupTouchActionButton(id, action) {
+  const btn = document.getElementById(id);
+  btn.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    startTouchPlay();
+    setTouchButtonActive(btn, true);
+    action();
+  });
+  const release = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setTouchButtonActive(btn, false);
+  };
+  btn.addEventListener('pointerup', release);
+  btn.addEventListener('pointercancel', release);
+}
+
+function setupTouchMiningButton(id) {
+  const btn = document.getElementById(id);
+  btn.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    startTouchPlay();
+    miningHeld = true;
+    miningCooldown = 0;
+    clearMiningProgress();
+    setTouchButtonActive(btn, true);
+  });
+  const release = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    miningHeld = false;
+    clearMiningProgress();
+    setTouchButtonActive(btn, false);
+  };
+  btn.addEventListener('pointerup', release);
+  btn.addEventListener('pointercancel', release);
+  btn.addEventListener('lostpointercapture', () => {
+    miningHeld = false;
+    clearMiningProgress();
+    setTouchButtonActive(btn, false);
+  });
+}
+
+function setupTouchPlacingButton(id) {
+  const btn = document.getElementById(id);
+  btn.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    startTouchPlay();
+    placingHeld = true;
+    placeCooldown = PLACE_COOLDOWN;
+    setTouchButtonActive(btn, true);
+    interactBlock(2);
+  });
+  const release = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    placingHeld = false;
+    setTouchButtonActive(btn, false);
+  };
+  btn.addEventListener('pointerup', release);
+  btn.addEventListener('pointercancel', release);
+  btn.addEventListener('lostpointercapture', () => {
+    placingHeld = false;
+    setTouchButtonActive(btn, false);
+  });
+}
+
+async function toggleFullscreen() {
+  const root = document.documentElement;
+  if (document.fullscreenElement) {
+    await document.exitFullscreen();
+  } else if (root.requestFullscreen) {
+    await root.requestFullscreen({ navigationUI: 'hide' });
+  } else if (root.webkitRequestFullscreen) {
+    root.webkitRequestFullscreen();
+  }
+}
+
+function toggleFlyMode() {
+  if (gameMode === 'survival') {
+    updateHudMode();
+    return;
+  }
+  player.fly = !player.fly;
+  player.vel.y = 0;
+  updateHudMode();
+}
+
+function setupTouchControls() {
+  const stick = document.getElementById('move-stick');
+  const knob = document.getElementById('move-knob');
+  const lookPad = document.getElementById('look-pad');
+  let stickPointer = null;
+  let lookPointer = null;
+  let lookX = 0;
+  let lookY = 0;
+
+  function updateStick(clientX, clientY) {
+    const rect = stick.getBoundingClientRect();
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+    const max = rect.width * 0.34;
+    let dx = clientX - centerX;
+    let dy = clientY - centerY;
+    const len = Math.hypot(dx, dy);
+    if (len > max) {
+      dx = dx / len * max;
+      dy = dy / len * max;
+    }
+    touchMove.x = dx / max;
+    touchMove.z = dy / max;
+    knob.style.transform = `translate(${dx}px, ${dy}px)`;
+  }
+
+  function resetStick() {
+    stickPointer = null;
+    touchMove.x = 0;
+    touchMove.z = 0;
+    knob.style.transform = 'translate(0, 0)';
+  }
+
+  stick.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    startTouchPlay();
+    stickPointer = e.pointerId;
+    stick.setPointerCapture(e.pointerId);
+    updateStick(e.clientX, e.clientY);
+  });
+  stick.addEventListener('pointermove', (e) => {
+    if (e.pointerId !== stickPointer) return;
+    e.preventDefault();
+    updateStick(e.clientX, e.clientY);
+  });
+  stick.addEventListener('pointerup', resetStick);
+  stick.addEventListener('pointercancel', resetStick);
+
+  lookPad.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    startTouchPlay();
+    lookPointer = e.pointerId;
+    lookX = e.clientX;
+    lookY = e.clientY;
+    lookPad.setPointerCapture(e.pointerId);
+  });
+  lookPad.addEventListener('pointermove', (e) => {
+    if (e.pointerId !== lookPointer) return;
+    e.preventDefault();
+    const dx = e.clientX - lookX;
+    const dy = e.clientY - lookY;
+    lookX = e.clientX;
+    lookY = e.clientY;
+    player.yaw -= dx * 0.004;
+    player.pitch -= dy * 0.004;
+    player.pitch = Math.max(-1.55, Math.min(1.55, player.pitch));
+  });
+  lookPad.addEventListener('pointerup', () => { lookPointer = null; });
+  lookPad.addEventListener('pointercancel', () => { lookPointer = null; });
+
+  setupTouchHoldButton('btn-touch-jump', 'jump');
+  setupTouchHoldButton('btn-touch-sprint', 'sprint');
+  setupTouchMiningButton('btn-touch-break');
+  setupTouchPlacingButton('btn-touch-place');
+  setupTouchActionButton('btn-touch-fly', toggleFlyMode);
+  setupTouchActionButton('btn-touch-shot', saveScreenshot);
+  setupTouchActionButton('btn-touch-inventory', () => setInventoryOpen(!inventoryOpen));
+  setupTouchActionButton('btn-touch-fullscreen', () => {
+    toggleFullscreen().catch(() => {});
+  });
+}
+
+function setupInventoryUI() {
+  document.getElementById('inventory-close').addEventListener('click', () => setInventoryOpen(false));
+}
+
+function renderChat() {
+  const log = document.getElementById('chat-log');
+  log.innerHTML = '';
+  chatState.messages.slice(-60).forEach((message) => {
+    const row = document.createElement('div');
+    row.className = 'msg';
+    row.innerHTML = `<span class="name">${message.name}</span>: ${message.text}`;
+    log.appendChild(row);
+  });
+  log.scrollTop = log.scrollHeight;
+}
+
+function addChatMessage(name, text) {
+  const cleanText = text.trim();
+  if (!cleanText) return;
+  chatState.messages.push({ name: name.trim() || 'Player', text: cleanText, time: Date.now() });
+  renderChat();
+}
+
+function setupChatUI() {
+  renderChat();
+  const chatInput = document.getElementById('chat-input');
+  chatInput.addEventListener('keydown', (e) => {
+    if (e.code === 'Escape') {
+      e.stopPropagation();
+      handleEscapeKey(e);
+    }
+  });
+
+  document.getElementById('chat-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const input = document.getElementById('chat-input');
+    addChatMessage('Player', input.value);
+    input.value = '';
+    input.blur();
+  });
+  document.getElementById('btn-chat-collapse').addEventListener('click', () => {
+    chatState.collapsed = !chatState.collapsed;
+    document.getElementById('chat-log').style.display = chatState.collapsed ? 'none' : 'block';
+    document.getElementById('chat-form').style.display = chatState.collapsed ? 'none' : 'grid';
+    document.getElementById('btn-chat-collapse').textContent = chatState.collapsed ? '??' : '???';
+  });
+}
+
+function regenerate(presetKey, seed = null, savedState = null, shouldSave = true) {
+  currentPreset = presetKey;
+  currentSeed = seed ?? ((Math.random() * 0xffffffff) >>> 0);
+  world = generateWorld(presetKey, currentSeed);
+  rebuildAllChunks();
+  player.spawn(world);
+  if (savedState) restorePlayerState(savedState);
+  player.fly = false;
+  if (savedState) player.fly = Boolean(savedState.fly && gameMode === 'creative');
+  resetPlayerHp();
+  if (savedState) restorePlayerState(savedState);
+  updateHudMode();
+  document.querySelectorAll('#presets button').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.preset === presetKey);
+  });
+  if (shouldSave) saveGameState(true);
+}
+
+function buildPresetButtons() {
+  const box = document.getElementById('presets');
+  for (const [key, p] of Object.entries(PRESETS)) {
+    const btn = document.createElement('button');
+    btn.textContent = p.label;
+    btn.dataset.preset = key;
+    btn.addEventListener('click', () => regenerate(key));
+    box.appendChild(btn);
+  }
+  document.getElementById('btn-regen').addEventListener('click', () => regenerate(currentPreset));
+}
+
+function setupMenuUI() {
+  document.getElementById('btn-resume').addEventListener('click', () => {
+    if (panel.classList.contains('pause-open')) resumeGame();
+    else showWorldSelect();
+  });
+  document.getElementById('btn-settings').addEventListener('click', () => {
+    panel.classList.remove('world-select-open');
+    panel.classList.toggle('settings-open');
+  });
+  document.getElementById('btn-exit').addEventListener('click', () => {
+    saveGameState(true);
+    showTitleMenu();
+  });
+}
+
+function updateHudMode() {
+  const label = (PRESETS[currentPreset] && PRESETS[currentPreset].label) || '画像';
+  const moveMode = player.fly ? '飛行' : '歩行';
+  const toolText = gameMode === 'survival' ? ` / ${SURVIVAL_TOOLS[selectedToolIndex].label}` : '';
+  hudMode.textContent = `${label} / ${gameModeLabel()} / ${moveMode}モード${toolText} (同じキー2回で飛行切替)`;
+}
+
+/* ============ 画像インポート ============ */
+function saveScreenshot() {
+  const a = document.createElement('a');
+  a.href = renderer.domElement.toDataURL('image/png');
+  a.download = 'block-world.png';
+  a.click();
+}
+
+/* ============ メインループ ============ */
+function updateHeldMining(dt) {
+  if (!miningHeld || inventoryOpen || !(pointerLocked || touchPlayActive)) {
+    miningCooldown = 0;
+    clearMiningProgress();
+    return;
+  }
+  if (miningCooldown > 0) {
+    miningCooldown = Math.max(0, miningCooldown - dt);
+    return;
+  }
+
+  const eye = player.eyePos();
+  const dir = player.lookDir();
+  const hit = raycastVoxel(world, eye.x, eye.y, eye.z, dir.x, dir.y, dir.z, 8);
+  if (!hit) {
+    clearMiningProgress();
+    return;
+  }
+  const blockId = world.get(hit.x, hit.y, hit.z);
+  if (!isBreakableBlock(blockId)) {
+    clearMiningProgress();
+    return;
+  }
+
+  const key = blockKey(hit.x, hit.y, hit.z);
+  if (!miningTarget || miningTarget.key !== key || miningTarget.blockId !== blockId) {
+    miningTarget = { key, blockId };
+    miningProgress = 0;
+  }
+
+  if (gameMode === 'creative') {
+    interactBlock(0);
+    miningCooldown = 0.10;
+    return;
+  }
+
+  const duration = getBreakDuration(blockId);
+  miningProgress += dt / duration;
+  updateBreakOverlay(hit, miningProgress);
+  if (miningProgress >= 1) {
+    interactBlock(0);
+    miningCooldown = 0.12;
+  }
+}
+
+function updateHeldPlacing(dt) {
+  if (!placingHeld || inventoryOpen || !(pointerLocked || touchPlayActive)) {
+    placeCooldown = 0;
+    return;
+  }
+  placeCooldown -= dt;
+  if (placeCooldown > 0) return;
+  interactBlock(2);
+  placeCooldown = PLACE_COOLDOWN;
+}
+
+let lastTime = performance.now();
+
+function animate() {
+  requestAnimationFrame(animate);
+  const now = performance.now();
+  const dt = (now - lastTime) / 1000;
+  lastTime = now;
+
+  if (!inventoryOpen && (pointerLocked || touchPlayActive)) {
+    const activeKeys = new Set(keys);
+    for (const code of touchKeys) activeKeys.add(code);
+    player.update(dt, activeKeys, world, touchMove, KEY_BINDINGS);
+  }
+  updateHeldMining(dt);
+  updateHeldPlacing(dt);
+  updateSurvivalStats(dt);
+
+  // カメラをプレイヤーの目に同期
+  const eye = player.eyePos();
+  camera.position.set(eye.x, eye.y, eye.z);
+  camera.rotation.order = 'YXZ';
+  camera.rotation.y = player.yaw;
+  camera.rotation.x = player.pitch;
+
+  // 雲をゆっくり流す
+  for (const cloud of cloudGroup.children) {
+    cloud.position.x += dt * 1.2;
+    if (cloud.position.x > WORLD_SX * 1.4) cloud.position.x = -WORLD_SX * 0.4;
+  }
+
+  updateHighlight();
+
+  // 水中の色かぶり
+  const headBlock = world.get(Math.floor(eye.x), Math.floor(eye.y), Math.floor(eye.z));
+  waterOverlay.style.display = headBlock === BLOCK.WATER ? 'block' : 'none';
+
+  const hpText = gameMode === 'survival' ? ` / HP:${playerHp}/${MAX_HP}` : '';
+  hudPos.textContent = `X:${player.pos.x.toFixed(0)} Y:${player.pos.y.toFixed(0)} Z:${player.pos.z.toFixed(0)}${hpText}`;
+
+  saveGameState();
+  renderer.render(scene, camera);
+}
+
+window.addEventListener('beforeunload', () => saveGameState(true));
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') saveGameState(true);
+});
+
+/* ============ 起動 ============ */
+buildPresetButtons();
+setupMenuUI();
+buildHotbar();
+setupGameModeUI();
+setupKeyConfigUI();
+setupTouchControls();
+setupInventoryUI();
+setupChatUI();
+regenerate('plains', null, null, false);
+renderWorldList();
+animate();

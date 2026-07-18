@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>ブロックワールド — マイクラ風3D</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
+  body { font-family: "Segoe UI", "Hiragino Sans", "Meiryo", sans-serif; user-select: none; }
+  #game { display: block; width: 100%; height: 100%; }
+
+  /* 左上パネル */
+  #panel {
+    position: fixed; top: 12px; left: 12px; z-index: 10;
+    width: 250px; padding: 12px 14px;
+    background: rgba(20, 24, 34, 0.82); color: #eef2f7;
+    border: 2px solid rgba(255,255,255,0.15); border-radius: 10px;
+    backdrop-filter: blur(4px);
+    font-size: 13px;
+  }
+  #panel h1 { font-size: 16px; margin-bottom: 8px; letter-spacing: 1px; }
+  #panel h2 { font-size: 12px; margin: 10px 0 5px; color: #9fd08a; }
+  #presets { display: flex; flex-wrap: wrap; gap: 5px; }
+  #presets button, #btn-regen {
+    padding: 5px 9px; font-size: 12px; cursor: pointer;
+    background: #3a4356; color: #eef2f7;
+    border: 1px solid rgba(255,255,255,0.25); border-radius: 6px;
+  }
+  #presets button:hover, #btn-regen:hover { background: #4c5870; }
+  #presets button.active { background: #4f8f3a; border-color: #7fce62; }
+  #btn-regen { margin-top: 6px; width: 100%; }
+
+  #img-section label { display: block; margin: 6px 0 2px; font-size: 12px; color: #cfd8e4; }
+  #img-section input[type="file"] { width: 100%; font-size: 11px; color: #cfd8e4; }
+  #img-section select, #img-section input[type="range"] { width: 100%; }
+  #img-section select {
+    background: #3a4356; color: #eef2f7; border: 1px solid rgba(255,255,255,0.25);
+    border-radius: 4px; padding: 3px;
+  }
+
+  #help { margin-top: 10px; font-size: 11px; line-height: 1.7; color: #b8c2d0; }
+  #help b { color: #eef2f7; }
+
+  /* HUD */
+  #hud {
+    position: fixed; top: 12px; right: 12px; z-index: 10;
+    text-align: right; color: #fff; font-size: 12px;
+    text-shadow: 0 1px 3px rgba(0,0,0,0.8);
+  }
+
+  /* 照準 */
+  #crosshair {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    z-index: 5; pointer-events: none; color: rgba(255,255,255,0.9);
+    font-size: 20px; text-shadow: 0 0 3px rgba(0,0,0,0.8);
+  }
+
+  /* ホットバー */
+  #hotbar {
+    position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%);
+    z-index: 10; display: flex; gap: 4px;
+  }
+  #hotbar .slot {
+    width: 52px; padding: 5px 0 4px; text-align: center; cursor: pointer;
+    background: rgba(20, 24, 34, 0.78); color: #dfe6ee;
+    border: 2px solid rgba(255,255,255,0.22); border-radius: 8px;
+    font-size: 10px; line-height: 1.3;
+  }
+  #hotbar .slot.selected { border-color: #ffd75e; background: rgba(60, 60, 30, 0.8); }
+  #hotbar .key { display: block; font-size: 9px; color: #99a3b1; }
+  #hotbar .swatch {
+    display: block; width: 22px; height: 22px; margin: 2px auto;
+    border: 1px solid rgba(0,0,0,0.5); border-radius: 3px;
+    image-rendering: pixelated;
+  }
+
+  /* クリックで開始オーバーレイ */
+  #overlay {
+    position: fixed; inset: 0; z-index: 8; display: flex;
+    align-items: center; justify-content: center; pointer-events: none;
+  }
+  #overlay .msg {
+    padding: 14px 26px; background: rgba(20, 24, 34, 0.85); color: #fff;
+    border: 2px solid rgba(255,255,255,0.25); border-radius: 10px;
+    font-size: 15px; text-align: center; line-height: 1.6;
+  }
+
+  /* 水中エフェクト */
+  #water-overlay {
+    position: fixed; inset: 0; z-index: 4; display: none; pointer-events: none;
+    background: rgba(30, 90, 190, 0.35);
+  }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="panel">
+  <h1>⛏ ブロックワールド</h1>
+
+  <h2>場所を選ぶ</h2>
+  <div id="presets"></div>
+  <button id="btn-regen">🎲 同じ場所を再生成</button>
+
+  <div id="img-section">
+    <h2>画像をワールドにする</h2>
+    <input type="file" id="img-input" accept="image/*">
+    <label>表示モード</label>
+    <select id="img-mode">
+      <option value="mural">壁画(垂直に立てる)</option>
+      <option value="relief">レリーフ(明るさで高さ)</option>
+      <option value="flat">フラット(1段のドット絵)</option>
+    </select>
+    <label>サイズ(最大ブロック数): <span id="img-size-label">96</span></label>
+    <input type="range" id="img-size" min="16" max="140" value="96" step="4">
+  </div>
+
+  <div id="help">
+    <b>WASD</b> 移動 / <b>マウス</b> 視点 / <b>Space</b> ジャンプ<br>
+    <b>F</b> 飛行切替(Space上昇・左Shift下降)<br>
+    <b>左クリック</b> 壊す / <b>右クリック</b> 置く<br>
+    <b>1〜9</b> ブロック選択 / <b>P</b> スクリーンショット<br>
+    <b>Esc</b> でマウス解除(メニュー操作)
+  </div>
+</div>
+
+<div id="hud">
+  <div id="hud-pos"></div>
+  <div id="hud-mode"></div>
+</div>
+
+<div id="crosshair">+</div>
+<div id="hotbar"></div>
+<div id="water-overlay"></div>
+
+<div id="overlay">
+  <div class="msg">画面をクリックして開始<br><small>画像ファイルをドラッグ&ドロップしてもOK</small></div>
+</div>
+
+<script src="libs/three.min.js"></script>
+<script src="js/noise.js"></script>
+<script src="js/blocks.js"></script>
+<script src="js/world.js"></script>
+<script src="js/landmarks.js"></script>
+<script src="js/player.js"></script>
+<script src="js/image.js"></script>
+<script src="js/main.js"></script>
+<script>
+// 検証用フック: #mural / #relief / #flatart / または プリセット名
+window.addEventListener('load', () => {
+  const h = location.hash.slice(1);
+  if (h === 'mural' || h === 'relief' || h === 'flatart') {
+    const c = document.createElement('canvas');
+    c.width = 96; c.height = 64;
+    const g = c.getContext('2d');
+    const grad = g.createLinearGradient(0, 0, 96, 64);
+    grad.addColorStop(0, '#ff6b35');
+    grad.addColorStop(0.5, '#f7c548');
+    grad.addColorStop(1, '#4a90d9');
+    g.fillStyle = grad; g.fillRect(0, 0, 96, 64);
+    g.fillStyle = '#ffffff'; g.beginPath(); g.arc(48, 30, 20, 0, 7); g.fill();
+    g.fillStyle = '#222'; g.beginPath(); g.arc(41, 25, 3.5, 0, 7); g.fill();
+    g.beginPath(); g.arc(55, 25, 3.5, 0, 7); g.fill();
+    g.strokeStyle = '#222'; g.lineWidth = 3;
+    g.beginPath(); g.arc(48, 32, 10, 0.3, Math.PI - 0.3); g.stroke();
+    const idata = g.getImageData(0, 0, 96, 64);
+    const mode = h === 'flatart' ? 'flat' : h;
+    world = generateWorld('flat', 1);
+    currentPreset = 'flat';
+    const view = placeImageInWorld(world, idata, mode, PRESETS.flat.base);
+    rebuildAllChunks();
+    player.pos = view.pos; player.vel = { x: 0, y: 0, z: 0 };
+    player.yaw = view.yaw; player.pitch = view.pitch; player.fly = view.fly;
+  } else if (h === 'landmarks-air') {
+    regenerate('landmarks');
+    player.fly = true;
+    player.pos = { x: 80, y: 60, z: 155 };
+    player.yaw = 0; player.pitch = -0.35;
+  } else if (PRESETS[h]) {
+    regenerate(h);
+    if (h !== 'landmarks') {
+      player.fly = true;
+      player.pos.y = Math.min(WORLD_SY - 5, world.heightAt(Math.floor(player.pos.x), Math.floor(player.pos.z)) + 18);
+      player.pitch = -0.35;
+    }
+  }
+});
+</script>
+</body>
+</html>
