@@ -6,6 +6,7 @@ param(
 $ErrorActionPreference = "Stop"
 $repo = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $logPath = Join-Path $repo ".auto-push.log"
+$lockPath = Join-Path $repo ".auto-push.lock"
 $pending = $false
 $lastChange = Get-Date
 $isSyncing = $false
@@ -22,6 +23,22 @@ function Invoke-Git($arguments) {
   }
   return $output
 }
+
+function Test-ProcessAlive($processId) {
+  if (-not $processId) { return $false }
+  return $null -ne (Get-Process -Id $processId -ErrorAction SilentlyContinue)
+}
+
+if (Test-Path -LiteralPath $lockPath) {
+  $existingPid = Get-Content -LiteralPath $lockPath -ErrorAction SilentlyContinue | Select-Object -First 1
+  if (Test-ProcessAlive $existingPid) {
+    Write-Log "Auto push watcher is already running as PID $existingPid. Exiting."
+    exit 0
+  }
+  Remove-Item -LiteralPath $lockPath -Force -ErrorAction SilentlyContinue
+}
+
+Set-Content -LiteralPath $lockPath -Value $PID
 
 function Sync-Changes {
   if ($isSyncing) { return }
@@ -72,10 +89,14 @@ Register-ObjectEvent $watcher Created -Action $action | Out-Null
 Register-ObjectEvent $watcher Deleted -Action $action | Out-Null
 Register-ObjectEvent $watcher Renamed -Action $action | Out-Null
 
-while ($true) {
-  Start-Sleep -Seconds 1
-  if ($pending -and ((Get-Date) - $lastChange).TotalSeconds -ge $DebounceSeconds) {
-    $pending = $false
-    Sync-Changes
+try {
+  while ($true) {
+    Start-Sleep -Seconds 1
+    if ($pending -and ((Get-Date) - $lastChange).TotalSeconds -ge $DebounceSeconds) {
+      $pending = $false
+      Sync-Changes
+    }
   }
+} finally {
+  Remove-Item -LiteralPath $lockPath -Force -ErrorAction SilentlyContinue
 }

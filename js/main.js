@@ -191,6 +191,8 @@ let regenTimer = 0;
 const SAVE_COOKIE_NAME = 'block_world_save';
 const WORLD_LIST_STORAGE = 'block_world_worlds';
 let lastSaveTime = 0;
+let lastCookieSaveTime = 0;
+let lastSavedPayload = '';
 let activeWorldId = null;
 
 function setSaveCookie(value) {
@@ -221,12 +223,17 @@ function loadSavedGame() {
 function saveGameState(force = false) {
   if (!world || !player || !activeWorldId) return;
   const now = performance.now();
-  if (!force && now - lastSaveTime < 2000) return;
+  if (!force && now - lastSaveTime < 10000) return;
   lastSaveTime = now;
   const state = makeCurrentState();
   const encoded = encodeURIComponent(JSON.stringify(state));
+  if (!force && encoded === lastSavedPayload) return;
+  lastSavedPayload = encoded;
   localStorage.setItem(SAVE_COOKIE_NAME, encoded);
-  setSaveCookie(encoded);
+  if (force || now - lastCookieSaveTime > 30000) {
+    setSaveCookie(encoded);
+    lastCookieSaveTime = now;
+  }
   updateActiveWorldState(state);
 }
 
