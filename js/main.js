@@ -9,7 +9,8 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 const SKY_COLOR = 0x87ceeb;
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(SKY_COLOR);
-scene.fog = new THREE.Fog(SKY_COLOR, 90, 260);
+// 初期値。起動時に applyRenderDistance() が描画距離に合わせて上書きする。
+scene.fog = new THREE.Fog(SKY_COLOR, 70, 178);
 
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 600);
 
@@ -63,7 +64,12 @@ function rebuildChunk(cx, cz) {
   if (old) disposeEntry(old);
 
   const data = buildChunkMeshData(world, cx, cz, visualShadowsEnabled);
-  const entry = { opaque: null, water: null };
+  const entry = {
+    opaque: null,
+    water: null,
+    centerX: cx * CHUNK + CHUNK / 2,
+    centerZ: cz * CHUNK + CHUNK / 2,
+  };
 
   const og = makeGeometry(data.opaque);
   if (og) {
@@ -117,6 +123,46 @@ function rebuildAround(x, y, z) {
   for (const key of set) {
     const [a, b] = key.split(',').map(Number);
     rebuildChunk(a, b);
+  }
+}
+
+/* ============ 描画距離 ============ */
+// これより遠いチャンクは描画対象から外す。霧の終端を描画距離より内側に置くことで、
+// チャンクが消える瞬間を霧で隠す(差の 14 はチャンク中心から角までの 8√2≒11.3 ぶんの余裕)。
+const RENDER_DISTANCE_OPTIONS = [96, 128, 160, 192, 224, 272];
+const DEFAULT_RENDER_DISTANCE = 192;
+const RENDER_DISTANCE_STORAGE = 'block_world_render_distance';
+let renderDistance = DEFAULT_RENDER_DISTANCE;
+
+function loadRenderDistance() {
+  const saved = Number(localStorage.getItem(RENDER_DISTANCE_STORAGE));
+  return RENDER_DISTANCE_OPTIONS.includes(saved) ? saved : DEFAULT_RENDER_DISTANCE;
+}
+
+function applyRenderDistance(value) {
+  renderDistance = RENDER_DISTANCE_OPTIONS.includes(value) ? value : DEFAULT_RENDER_DISTANCE;
+  const far = renderDistance - 14;
+  scene.fog.far = far;
+  scene.fog.near = Math.round(far * 0.4);
+  localStorage.setItem(RENDER_DISTANCE_STORAGE, String(renderDistance));
+}
+
+function setupRenderDistanceUI() {
+  const select = document.getElementById('render-distance-select');
+  applyRenderDistance(loadRenderDistance());
+  select.value = String(renderDistance);
+  select.addEventListener('change', () => applyRenderDistance(Number(select.value)));
+}
+
+function updateChunkVisibility() {
+  const px = player.pos.x, pz = player.pos.z;
+  const limit = renderDistance * renderDistance;
+  for (const entry of chunkMeshes.values()) {
+    const dx = entry.centerX - px;
+    const dz = entry.centerZ - pz;
+    const visible = dx * dx + dz * dz <= limit;
+    if (entry.opaque) entry.opaque.visible = visible;
+    if (entry.water) entry.water.visible = visible;
   }
 }
 
@@ -1914,6 +1960,7 @@ function animate() {
   }
 
   updateHighlight();
+  updateChunkVisibility();
 
   // 水中の色かぶり
   const headBlock = world.get(Math.floor(eye.x), Math.floor(eye.y), Math.floor(eye.z));
@@ -1936,6 +1983,7 @@ buildPresetButtons();
 setupMenuUI();
 buildHotbar();
 setupGameModeUI();
+setupRenderDistanceUI();
 setupKeyConfigUI();
 setupVisualSettingsUI();
 setupTouchControls();

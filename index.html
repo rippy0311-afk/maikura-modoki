@@ -94,7 +94,7 @@
   #presets button.active { background: #4f8f3a; border-color: #7fce62; }
   #btn-regen { margin-top: 6px; width: 100%; }
 
-  #game-mode-select {
+  #game-mode-select, #render-distance-select {
     width: 100%; padding: 7px 9px;
     background: rgba(32,42,189,0.92); color: #fff;
     border: 1px solid rgba(255,255,255,0.35); border-radius: 6px;
@@ -467,6 +467,16 @@
   <select id="game-mode-select">
     <option value="creative">クリエイティブモード</option>
     <option value="survival">サバイバルモード</option>
+  </select>
+
+  <h2>描画距離</h2>
+  <select id="render-distance-select">
+    <option value="96">96 — 最速(遠景はすぐ霞む)</option>
+    <option value="128">128 — 軽い</option>
+    <option value="160">160 — やや軽い</option>
+    <option value="192">192 — 標準</option>
+    <option value="224">224 — 遠くまで見える</option>
+    <option value="272">272 — 最長(重い)</option>
   </select>
 
   <h2>キーコンフィグ</h2>

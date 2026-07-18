@@ -16,9 +16,17 @@ class World {
     this.itemNodes = new Map();
     this.blockColors = {};
     this.colors = new Map(); // COLOR ブロックの色 (index -> 0xRRGGBB)
+    // 列ごとの「これより上は空気」の目安。メッシュ化で上空の走査を打ち切るのに使う。
+    // 実際の最上面以上であれば良い(高めに見積もる分には安全)。
+    this.columnTop = new Int16Array(sx * sz);
   }
 
   index(x, y, z) { return (y * this.sz + z) * this.sx + x; }
+
+  raiseColumnTop(x, y, z) {
+    const i = z * this.sx + x;
+    if (y > this.columnTop[i]) this.columnTop[i] = y;
+  }
 
   inBounds(x, y, z) {
     return x >= 0 && x < this.sx && y >= 0 && y < this.sy && z >= 0 && z < this.sz;
@@ -36,6 +44,7 @@ class World {
     if (this.data[this.index(x, y, z)] === BLOCK.BEDROCK && id !== BLOCK.BEDROCK) return;
     const i = this.index(x, y, z);
     this.data[i] = id;
+    if (id !== BLOCK.AIR) this.raiseColumnTop(x, y, z);
     if (id !== BLOCK.COLOR) this.colors.delete(i);
     if (id !== BLOCK.CHEST) this.lootChests.delete(i);
     if (id !== BLOCK.ITEM_NODE) this.itemNodes.delete(i);
@@ -46,6 +55,7 @@ class World {
     if (y === 0 || this.get(x, y, z) === BLOCK.BEDROCK) return;
     const i = this.index(x, y, z);
     this.data[i] = BLOCK.CHEST;
+    this.raiseColumnTop(x, y, z);
     this.colors.delete(i);
     this.lootChests.set(i, items);
   }
@@ -62,6 +72,7 @@ class World {
     if (y === 0 || this.get(x, y, z) === BLOCK.BEDROCK) return;
     const i = this.index(x, y, z);
     this.data[i] = BLOCK.ITEM_NODE;
+    this.raiseColumnTop(x, y, z);
     this.lootChests.delete(i);
     this.itemNodes.set(i, { id: itemId, count });
     this.colors.set(i, color);
@@ -79,6 +90,7 @@ class World {
     if (y === 0 || this.get(x, y, z) === BLOCK.BEDROCK) return;
     const i = this.index(x, y, z);
     this.data[i] = BLOCK.COLOR;
+    this.raiseColumnTop(x, y, z);
     this.colors.set(i, rgb);
   }
 
@@ -87,15 +99,21 @@ class World {
   }
 
   // その列の一番上にある非空気ブロックの y
+  // 探索の開始点。columnTop は実際の最上面以上なので、ここから下れば取りこぼさない。
+  scanTop(x, z) {
+    if (x < 0 || x >= this.sx || z < 0 || z >= this.sz) return this.sy - 1;
+    return Math.min(this.sy - 1, this.columnTop[z * this.sx + x]);
+  }
+
   heightAt(x, z) {
-    for (let y = this.sy - 1; y >= 0; y--) {
+    for (let y = this.scanTop(x, z); y >= 0; y--) {
       if (this.get(x, y, z) !== BLOCK.AIR) return y;
     }
     return 0;
   }
 
   solidHeightAt(x, z) {
-    for (let y = this.sy - 1; y >= 0; y--) {
+    for (let y = this.scanTop(x, z); y >= 0; y--) {
       const block = this.get(x, y, z);
       if (block !== BLOCK.AIR && block !== BLOCK.WATER) return y;
     }
@@ -182,6 +200,8 @@ function generateWorld(presetKey, seed, worldSx = WORLD_SX, worldSy = WORLD_SY, 
       for (let y = h + 1; y <= waterLevel; y++) {
         world.data[world.index(x, y, z)] = BLOCK.WATER;
       }
+      // data を直接書いたので columnTop もここで確定させる(以降は set 系が自動更新)
+      world.columnTop[z * sx + x] = Math.min(sy - 1, Math.max(h, waterLevel));
     }
   }
 
@@ -359,13 +379,33 @@ function buildChunkMeshData(world, cx, cz, shadowsEnabled = true) {
   const x1 = Math.min(x0 + CHUNK, world.sx);
   const z1 = Math.min(z0 + CHUNK, world.sz);
 
-  for (let y = 0; y < world.sy; y++) {
+  const sx = world.sx, sy = world.sy, sz = world.sz;
+  const data = world.data;
+  const strideY = sx * sz;
+
+  // このチャンクで一番高い列まででメッシュ化を打ち切る(上空の空気を走査しない)
+  let maxY = 0;
+  for (let z = z0; z < z1; z++) {
+    for (let x = x0; x < x1; x++) {
+      const top = world.columnTop[z * sx + x];
+      if (top > maxY) maxY = top;
+    }
+  }
+
+  // 隣接ブロックへの添字オフセット。世界の端以外は world.get を介さず直接引く。
+  const faceOffsets = CUBE_FACES.map((f) => f.dir[0] + f.dir[1] * strideY + f.dir[2] * sx);
+
+  for (let y = 0; y <= maxY; y++) {
+    const yEdge = y === 0 || y === sy - 1;
     for (let z = z0; z < z1; z++) {
+      const zEdge = z === 0 || z === sz - 1;
       for (let x = x0; x < x1; x++) {
-        const id = world.data[world.index(x, y, z)];
+        const base = (y * sz + z) * sx + x;
+        const id = data[base];
         if (id === BLOCK.AIR) continue;
         const isWater = id === BLOCK.WATER;
         const buf = isWater ? water : opaque;
+        const onEdge = yEdge || zEdge || x === 0 || x === sx - 1;
 
         let tint = blockColorToTint(world.blockColors?.[id]);
         const hasBlockColor = Boolean(tint);
@@ -374,8 +414,11 @@ function buildChunkMeshData(world, cx, cz, shadowsEnabled = true) {
           tint = [((rgb >> 16) & 255) / 255, ((rgb >> 8) & 255) / 255, (rgb & 255) / 255];
         }
 
-        for (const face of CUBE_FACES) {
-          const nb = world.get(x + face.dir[0], y + face.dir[1], z + face.dir[2]);
+        for (let fi = 0; fi < CUBE_FACES.length; fi++) {
+          const face = CUBE_FACES[fi];
+          const nb = onEdge
+            ? world.get(x + face.dir[0], y + face.dir[1], z + face.dir[2])
+            : data[base + faceOffsets[fi]];
           let visible;
           if (isWater) {
             visible = nb === BLOCK.AIR; // 水面のみ
