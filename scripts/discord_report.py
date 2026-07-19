@@ -25,6 +25,10 @@ MAX_COMMITS = 20          # 一覧に載せる上限
 MAX_DESCRIPTION = 4000    # Discord の embed description は 4096 文字まで
 JST = timezone(timedelta(hours=9))
 
+# urllib の既定 User-Agent (Python-urllib/3.x) は Discord の前段の Cloudflare に
+# 弾かれる (HTTP 403 / error code 1010)。素性の分かる UA を必ず送る。
+USER_AGENT = 'maikura-modoki-report/1.0 (+https://github.com/rippy0311-afk/maikura-modoki)'
+
 
 def git(*args):
     result = subprocess.run(['git', *args], capture_output=True, text=True, check=True)
@@ -118,7 +122,8 @@ def main():
 
     body = json.dumps(payload, ensure_ascii=False).encode('utf-8')
     request = urllib.request.Request(
-        webhook, data=body, headers={'Content-Type': 'application/json'}, method='POST')
+        webhook, data=body, method='POST',
+        headers={'Content-Type': 'application/json', 'User-Agent': USER_AGENT})
     try:
         with urllib.request.urlopen(request) as response:
             print(f'Posted {len(commits)} commits to Discord (HTTP {response.status}).')
