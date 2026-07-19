@@ -1256,6 +1256,15 @@ function autoAssignHotbarSlot(blockId) {
   hotbarSlots[empty] = makeSlotItem(def.id, def.label, 1, def.color);
 }
 
+// クリエイティブは壊しても何も手に入らない代わりにブロックが無限に使える。
+// ホットバーが空のままだと何も置けないので、空き枠を既定のブロックで埋める。
+function ensureCreativeHotbar() {
+  if (gameMode !== 'creative') return;
+  HOTBAR_BLOCKS.slice(0, HOTBAR_SIZE).forEach((def, i) => {
+    if (!hotbarSlots[i]) hotbarSlots[i] = makeSlotItem(def.id, def.label, 1, def.color);
+  });
+}
+
 function addBlockToInventory(blockId, amount) {
   if (blockId === BLOCK.AIR || blockId === BLOCK.WATER || blockId === BLOCK.COLOR ||
       blockId === BLOCK.CHEST || blockId === BLOCK.ITEM_NODE || blockId === BLOCK.BEDROCK) return;
@@ -1641,6 +1650,7 @@ function setGameMode(mode) {
     player.vel.y = 0;
   }
   if (gameMode === 'survival') resetPlayerHp();
+  ensureCreativeHotbar();
   updateSurvivalUI();
   saveGameState(true);
 }
@@ -1649,6 +1659,7 @@ function setupGameModeUI() {
   const select = document.getElementById('game-mode-select');
   select.value = gameMode;
   select.addEventListener('change', () => setGameMode(select.value));
+  ensureCreativeHotbar();
   buildSurvivalUI();
   updateSurvivalUI();
 }
