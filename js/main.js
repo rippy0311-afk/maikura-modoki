@@ -325,7 +325,42 @@ function getBlockDisplayColor(blockId) {
   return HOTBAR_BLOCKS.find((item) => item.id === blockId)?.color || '#8b8f98';
 }
 
+/* ============ ブロックのアイコン ============ */
+// UI のスウォッチは単色だと石・石炭鉱石・鉄鉱石が見分けられない。
+// 実際に描画に使っているアトラスから該当タイルを切り出してアイコンにする。
+const blockIconCache = new Map();
+
+function blockIconUrl(blockId) {
+  if (blockIconCache.has(blockId)) return blockIconCache.get(blockId);
+  // 描画側(buildChunkMeshData)と同じ規則でタイルを選ぶ。
+  // 側面を使うのは、草の縁や木の樹皮が出て見分けやすいため。
+  const tileIdx = Array.isArray(blockTextureOverrides[blockId])
+    ? customTileForBlock(blockId)
+    : tileForFace(blockId, 0);
+  const canvas = document.createElement('canvas');
+  canvas.width = TILE_PX;
+  canvas.height = TILE_PX;
+  canvas.getContext('2d').drawImage(
+    atlasCanvas,
+    (tileIdx % ATLAS_COLS) * TILE_PX, Math.floor(tileIdx / ATLAS_COLS) * TILE_PX, TILE_PX, TILE_PX,
+    0, 0, TILE_PX, TILE_PX
+  );
+  const url = canvas.toDataURL();
+  blockIconCache.set(blockId, url);
+  return url;
+}
+
+// 所持数表のキー(ブロックIDなら画像、アイテムIDなら単色)からスウォッチの style を作る
+function swatchStyle(key, fallbackColor) {
+  const blockId = Number(key);
+  if (Number.isInteger(blockId) && BLOCK_TILES[blockId]) {
+    return `background-image:url(${blockIconUrl(blockId)});background-size:cover;image-rendering:pixelated`;
+  }
+  return `background:${fallbackColor || '#8b8f98'}`;
+}
+
 function applyBlockColorOverrides() {
+  blockIconCache.clear();   // テクスチャを編集したらアイコンも作り直す
   blockColorOverrides = normalizeBlockColors(blockColorOverrides);
   blockTextureOverrides = normalizeBlockTextures(blockTextureOverrides);
   const baseAtlas = makeAtlasCanvas();
@@ -1089,7 +1124,7 @@ function renderMcSlot(parent, item = null, slotId = '', onSelect = null) {
   if (slotId) slot.dataset.slotId = slotId;
   if (item && item.count > 0) {
     slot.title = item.label;
-    slot.innerHTML = `<div class="swatch" style="background:${item.color}"></div><span>${item.label}</span><span class="count">${item.count > 1 ? item.count : ''}</span>`;
+    slot.innerHTML = `<div class="swatch" style="${swatchStyle(item.id, item.color)}"></div><span>${item.label}</span><span class="count">${item.count > 1 ? item.count : ''}</span>`;
     slot.draggable = true;
     slot.addEventListener('dragstart', (e) => {
       e.dataTransfer.setData('application/json', JSON.stringify(cloneSlotItem(item)));
@@ -1201,7 +1236,7 @@ function renderCraftRecipes() {
     const name = document.createElement('div');
     name.className = 'craft-name';
     name.innerHTML =
-      `<span class="swatch" style="background:${craftKeyColor(recipeOutputKey(recipe))}"></span>` +
+      `<span class="swatch" style="${swatchStyle(recipeOutputKey(recipe), craftKeyColor(recipeOutputKey(recipe)))}"></span>` +
       `<span>${recipeLabel(recipe)}<span class="craft-need">${recipeInputText(recipe)}</span></span>`;
 
     const button = document.createElement('button');
@@ -1551,7 +1586,7 @@ function buildHotbar() {
     slot.className = 'slot' + (i === hotbarIndex ? ' selected' : '');
     const itemColor = item && typeof item.id === 'number' ? getBlockDisplayColor(item.id) : item?.color;
     slot.innerHTML = item
-      ? `<span class="key">${i + 1}</span><span class="swatch" style="background:${itemColor}"></span><span class="name">${item.label}</span><span class="count">${gameMode === 'survival' && typeof item.id === 'number' ? getBlockInventoryCount(item.id) : '?'}</span>`
+      ? `<span class="key">${i + 1}</span><span class="swatch" style="${swatchStyle(item.id, itemColor)}"></span><span class="name">${item.label}</span><span class="count">${gameMode === 'survival' && typeof item.id === 'number' ? getBlockInventoryCount(item.id) : '?'}</span>`
       : `<span class="key">${i + 1}</span><span class="name">?</span><span class="count"></span>`;
     slot.addEventListener('click', () => selectHotbar(i));
     bar.appendChild(slot);
