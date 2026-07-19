@@ -1273,6 +1273,30 @@ function getSurvivalDropBlockId(blockId) {
   return blockId;
 }
 
+// 道具が無くて回収できなかったときに理由を出す。
+// 黙って何も落ちないと「壊せない/バグ」に見えるため。
+const MISSING_TOOL_HINT = {
+  pickaxe: 'ツルハシが必要です(木材3+棒2でクラフト)',
+  shears: 'ハサミが必要です(鉄インゴット2でクラフト)',
+};
+
+function warnMissingTool(blockId) {
+  const role = getPreferredTool(blockId);
+  const hint = MISSING_TOOL_HINT[role];
+  if (!hint) return;
+  showToast(`${hint}`);
+}
+
+let toastTimer = null;
+function showToast(text) {
+  const el = document.getElementById('toast');
+  if (!el) return;
+  el.textContent = text;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 2600);
+}
+
 function collectMinedDrop(blockId, x, y, z) {
   if (blockId === BLOCK.CHEST) {
     collectLootChest(x, y, z);
@@ -1281,6 +1305,7 @@ function collectMinedDrop(blockId, x, y, z) {
   } else if (gameMode === 'survival') {
     const dropBlockId = getSurvivalDropBlockId(blockId);
     if (dropBlockId !== null) addBlockToInventory(dropBlockId, 1);
+    else warnMissingTool(blockId);
   }
 }
 
