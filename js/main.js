@@ -259,6 +259,7 @@ let lastKeyTapCode = '';
 let lastKeyTapTime = 0;
 let inventoryOpen = false;
 let openingInventory = false;
+let suppressPauseAfterInventoryClose = false;
 let selectedInventorySlot = 'hotbar-0';
 let selectedInventoryItem = null;
 const chatState = {
@@ -741,10 +742,11 @@ document.addEventListener('pointerlockchange', () => {
     placingHeld = false;
     clearMiningProgress();
   }
-  if (openingInventory || inventoryOpen) {
+  if (openingInventory || inventoryOpen || suppressPauseAfterInventoryClose) {
     panel.classList.add('hidden');
     overlay.style.display = 'none';
     openingInventory = false;
+    suppressPauseAfterInventoryClose = false;
     return;
   }
   if (!pointerLocked && activeWorldId && panel.classList.contains('hidden')) {
@@ -1233,7 +1235,13 @@ function setInventoryOpen(open) {
     renderInventoryScreen();
   } else {
     openingInventory = false;
-    if (wasOpen) setTimeout(resumeGame, 0);
+    if (wasOpen) {
+      suppressPauseAfterInventoryClose = true;
+      setTimeout(() => {
+        resumeGame();
+        setTimeout(() => { suppressPauseAfterInventoryClose = false; }, 120);
+      }, 0);
+    }
   }
 }
 
