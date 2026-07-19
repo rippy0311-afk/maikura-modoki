@@ -1129,17 +1129,17 @@ function renderMcSlot(parent, item = null, slotId = '', onSelect = null) {
 }
 
 function getMainInventoryItems() {
-  const resources = RESOURCE_ITEMS.map((item) => makeSlotItem(
-    item.id,
-    item.label,
-    getInventoryCount(item.id),
-    item.color
-  ));
-  // クラフトで手に入れたものは持っている分だけ並べる
+  // 持っているものだけを並べる。ブロック・資源・クラフト品をすべて対象にする。
+  const blocks = HOTBAR_BLOCKS
+    .filter((item) => getBlockInventoryCount(item.id) > 0)
+    .map((item) => makeSlotItem(item.id, item.label, getBlockInventoryCount(item.id), item.color));
+  const resources = RESOURCE_ITEMS
+    .filter((item) => getInventoryCount(item.id) > 0)
+    .map((item) => makeSlotItem(item.id, item.label, getInventoryCount(item.id), item.color));
   const crafted = Object.entries(CRAFT_ITEMS)
     .filter(([itemId]) => getInventoryCount(itemId) > 0)
     .map(([itemId, item]) => makeSlotItem(itemId, item.label, getInventoryCount(itemId), item.color));
-  return resources.concat(crafted).slice(0, 27);
+  return blocks.concat(resources, crafted).slice(0, 27);
 }
 
 function renderInventoryScreen() {
@@ -1245,10 +1245,22 @@ function setInventoryOpen(open) {
   }
 }
 
+// 拾ったブロックを空いているホットバー枠に自動で入れる。
+// これが無いと、集めたブロックが画面のどこにも出ず、置くこともできない。
+function autoAssignHotbarSlot(blockId) {
+  if (hotbarSlots.some((slot) => slot && slot.id === blockId)) return;
+  const empty = hotbarSlots.indexOf(null);
+  if (empty < 0) return;
+  const def = HOTBAR_BLOCKS.find((item) => item.id === blockId);
+  if (!def) return;
+  hotbarSlots[empty] = makeSlotItem(def.id, def.label, 1, def.color);
+}
+
 function addBlockToInventory(blockId, amount) {
   if (blockId === BLOCK.AIR || blockId === BLOCK.WATER || blockId === BLOCK.COLOR ||
       blockId === BLOCK.CHEST || blockId === BLOCK.ITEM_NODE || blockId === BLOCK.BEDROCK) return;
   survivalInventory[blockId] = getBlockInventoryCount(blockId) + amount;
+  autoAssignHotbarSlot(blockId);
   const resourceId = RESOURCE_DROPS[blockId];
   if (resourceId) survivalInventory[resourceId] = getInventoryCount(resourceId) + amount;
   updateSurvivalUI();
