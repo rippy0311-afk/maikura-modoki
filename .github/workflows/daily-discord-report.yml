@@ -1,0 +1,34 @@
+name: Daily Discord report
+
+# その日の main への変更をまとめて Discord に投稿する。
+# 手動実行もできるので、まず workflow_dispatch で動作確認するとよい。
+on:
+  schedule:
+    # UTC 12:00 = JST 21:00
+    - cron: '0 12 * * *'
+  workflow_dispatch:
+    inputs:
+      hours:
+        description: '何時間さかのぼるか'
+        required: false
+        default: '24'
+      dry_run:
+        description: 'true にすると Discord に送らず内容だけ表示する'
+        required: false
+        default: 'false'
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # 期間で絞るため全履歴が要る
+
+      - name: Build and send report
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          HOURS: ${{ github.event.inputs.hours || '24' }}
+          DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}
+        run: python3 scripts/discord_report.py
