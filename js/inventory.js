@@ -125,6 +125,29 @@ function restoreArmorState(items) {
   });
 }
 
+function getInventoryLayoutState() {
+  return {
+    hotbar: hotbarSlots.map((item) => cloneSlotItem(item)),
+    main: mainInventorySlots.map((item) => cloneSlotItem(item)),
+  };
+}
+
+function restoreInventoryLayoutState(layout) {
+  hotbarSlots.fill(null);
+  mainInventorySlots.fill(null);
+  if (!layout || typeof layout !== 'object') return;
+  if (Array.isArray(layout.hotbar)) {
+    layout.hotbar.slice(0, HOTBAR_SIZE).forEach((item, index) => {
+      hotbarSlots[index] = cloneSlotItem(item);
+    });
+  }
+  if (Array.isArray(layout.main)) {
+    layout.main.slice(0, MAIN_INVENTORY_SIZE).forEach((item, index) => {
+      mainInventorySlots[index] = cloneSlotItem(item);
+    });
+  }
+}
+
 function initializeSurvivalInventory() {
   HOTBAR_BLOCKS.forEach((item) => setInventoryCount(item.id, 0));
   RESOURCE_ITEMS.forEach((item) => setInventoryCount(item.id, 0));
