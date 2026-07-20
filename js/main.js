@@ -1103,12 +1103,11 @@ function renderMcSlot(parent, item = null, slotId = '', onSelect = null) {
     slot.innerHTML = `<div class="swatch" style="${swatchStyle(item.id, item.color)}"></div><span>${item.label}</span><span class="count">${item.count > 1 ? item.count : ''}</span>`;
     slot.draggable = true;
     slot.addEventListener('dragstart', (e) => {
-      e.dataTransfer.setData('application/json', JSON.stringify(cloneSlotItem(item)));
-      e.dataTransfer.effectAllowed = 'copy';
+      e.dataTransfer.setData('application/json', JSON.stringify({ item: cloneSlotItem(item), sourceSlotId: slotId }));
+      e.dataTransfer.effectAllowed = isMovableInventorySlot(slotId) ? 'move' : 'copy';
     });
   }
-  if (slotId.startsWith('hotbar-')) {
-    const index = Number(slotId.slice(7));
+  if (isMovableInventorySlot(slotId)) {
     slot.addEventListener('dragover', (e) => {
       e.preventDefault();
       slot.classList.add('drag-over');
@@ -1120,10 +1119,8 @@ function renderMcSlot(parent, item = null, slotId = '', onSelect = null) {
       const raw = e.dataTransfer.getData('application/json');
       if (!raw) return;
       try {
-        hotbarSlots[index] = cloneSlotItem(JSON.parse(raw));
-        selectHotbar(index);
-        buildHotbar();
-        renderInventoryScreen();
+        const payload = JSON.parse(raw);
+        moveInventorySlot(payload.sourceSlotId || '', slotId, payload.item || payload);
       } catch (err) {
         console.warn('Invalid dragged item', err);
       }
@@ -1140,17 +1137,8 @@ function renderMcSlot(parent, item = null, slotId = '', onSelect = null) {
 }
 
 function getMainInventoryItems() {
-  // 持っているものだけを並べる。ブロック・資源・クラフト品をすべて対象にする。
-  const blocks = HOTBAR_BLOCKS
-    .filter((item) => getBlockInventoryCount(item.id) > 0)
-    .map((item) => makeSlotItem(item.id, item.label, getBlockInventoryCount(item.id), item.color));
-  const resources = RESOURCE_ITEMS
-    .filter((item) => getInventoryCount(item.id) > 0)
-    .map((item) => makeSlotItem(item.id, item.label, getInventoryCount(item.id), item.color));
-  const crafted = Object.entries(CRAFT_ITEMS)
-    .filter(([itemId]) => getInventoryCount(itemId) > 0)
-    .map(([itemId, item]) => makeSlotItem(itemId, item.label, getInventoryCount(itemId), item.color));
-  return blocks.concat(resources, crafted).slice(0, 27);
+  syncMainInventorySlots();
+  return mainInventorySlots;
 }
 
 function renderInventoryScreen() {
