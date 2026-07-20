@@ -16,6 +16,8 @@ class World {
     this.itemNodes = new Map();
     this.blockColors = {};
     this.blockTextures = {};
+    this.editDiff = new Map();
+    this.trackEdits = false;
     this.colors = new Map(); // COLOR ブロックの色 (index -> 0xRRGGBB)
     // 列ごとの「これより上は空気」の目安。メッシュ化で上空の走査を打ち切るのに使う。
     // 実際の最上面以上であれば良い(高めに見積もる分には安全)。
@@ -27,6 +29,54 @@ class World {
   raiseColumnTop(x, y, z) {
     const i = z * this.sx + x;
     if (y > this.columnTop[i]) this.columnTop[i] = y;
+  }
+
+  recordEdit(index, id) {
+    if (!this.trackEdits) return;
+    const edit = { i: index, b: id };
+    const color = this.colors.get(index);
+    const loot = this.lootChests.get(index);
+    const item = this.itemNodes.get(index);
+    if (typeof color === 'number') edit.c = color;
+    if (loot) edit.l = loot;
+    if (item) edit.n = item;
+    this.editDiff.set(index, edit);
+  }
+
+  exportEdits() {
+    return [...this.editDiff.values()];
+  }
+
+  applyEdits(edits) {
+    if (!Array.isArray(edits)) return;
+    const wasTracking = this.trackEdits;
+    this.trackEdits = false;
+    for (const edit of edits) {
+      const index = Number(edit?.i);
+      const id = Number(edit?.b);
+      if (!Number.isInteger(index) || index < 0 || index >= this.data.length) continue;
+      if (!Number.isInteger(id) || id < BLOCK.AIR || id > BLOCK.ITEM_NODE) continue;
+      if (this.data[index] === BLOCK.BEDROCK && id !== BLOCK.BEDROCK) continue;
+      this.data[index] = id;
+      this.colors.delete(index);
+      this.lootChests.delete(index);
+      this.itemNodes.delete(index);
+      if (id === BLOCK.COLOR && typeof edit.c === 'number') this.colors.set(index, edit.c);
+      if (id === BLOCK.CHEST && Array.isArray(edit.l)) this.lootChests.set(index, edit.l);
+      if (id === BLOCK.ITEM_NODE && edit.n && typeof edit.n.id === 'string') {
+        this.itemNodes.set(index, { id: edit.n.id, count: Number(edit.n.count) || 1 });
+        if (typeof edit.c === 'number') this.colors.set(index, edit.c);
+      }
+      if (id !== BLOCK.AIR) {
+        const x = index % this.sx;
+        const yz = Math.floor(index / this.sx);
+        const z = yz % this.sz;
+        const y = Math.floor(yz / this.sz);
+        this.raiseColumnTop(x, y, z);
+      }
+      this.editDiff.set(index, { ...edit, i: index, b: id });
+    }
+    this.trackEdits = wasTracking;
   }
 
   inBounds(x, y, z) {
@@ -49,6 +99,7 @@ class World {
     if (id !== BLOCK.COLOR) this.colors.delete(i);
     if (id !== BLOCK.CHEST) this.lootChests.delete(i);
     if (id !== BLOCK.ITEM_NODE) this.itemNodes.delete(i);
+    this.recordEdit(i, id);
   }
 
   setLootChest(x, y, z, items) {
@@ -59,6 +110,8 @@ class World {
     this.raiseColumnTop(x, y, z);
     this.colors.delete(i);
     this.lootChests.set(i, items);
+    this.itemNodes.delete(i);
+    this.recordEdit(i, BLOCK.CHEST);
   }
 
   takeLootChest(x, y, z) {
@@ -77,6 +130,7 @@ class World {
     this.lootChests.delete(i);
     this.itemNodes.set(i, { id: itemId, count });
     this.colors.set(i, color);
+    this.recordEdit(i, BLOCK.ITEM_NODE);
   }
 
   takeItemNode(x, y, z) {
@@ -93,6 +147,9 @@ class World {
     this.data[i] = BLOCK.COLOR;
     this.raiseColumnTop(x, y, z);
     this.colors.set(i, rgb);
+    this.lootChests.delete(i);
+    this.itemNodes.delete(i);
+    this.recordEdit(i, BLOCK.COLOR);
   }
 
   getColor(x, y, z) {

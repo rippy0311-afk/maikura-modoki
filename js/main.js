@@ -38,6 +38,7 @@ let world = null;
 let currentPreset = 'plains';
 let currentSeed = 0;
 const chunkMeshes = new Map(); // "cx,cz" -> { opaque: Mesh|null, water: Mesh|null }
+let chunkBuildToken = 0;
 
 function makeGeometry(d) {
   if (d.positions.length === 0) return null;
@@ -87,6 +88,7 @@ function rebuildChunk(cx, cz) {
 }
 
 function rebuildAllChunks() {
+  chunkBuildToken++;
   for (const entry of chunkMeshes.values()) disposeEntry(entry);
   chunkMeshes.clear();
   const nx = Math.ceil(world.sx / CHUNK);
@@ -97,6 +99,7 @@ function rebuildAllChunks() {
 }
 
 async function rebuildAllChunksWithProgress(onProgress) {
+  chunkBuildToken++;
   for (const entry of chunkMeshes.values()) disposeEntry(entry);
   chunkMeshes.clear();
   const nx = Math.ceil(world.sx / CHUNK);
@@ -111,6 +114,54 @@ async function rebuildAllChunksWithProgress(onProgress) {
     onProgress?.(done / total);
     await new Promise((resolve) => requestAnimationFrame(resolve));
   }
+}
+
+function getSortedChunkCoords(centerX, centerZ) {
+  const nx = Math.ceil(world.sx / CHUNK);
+  const nz = Math.ceil(world.sz / CHUNK);
+  const centerCx = Math.floor(centerX / CHUNK);
+  const centerCz = Math.floor(centerZ / CHUNK);
+  const coords = [];
+  for (let cz = 0; cz < nz; cz++) {
+    for (let cx = 0; cx < nx; cx++) {
+      coords.push({ cx, cz, d: Math.hypot(cx - centerCx, cz - centerCz) });
+    }
+  }
+  coords.sort((a, b) => a.d - b.d);
+  return coords;
+}
+
+async function rebuildNearbyChunksWithProgress(centerX, centerZ, onProgress) {
+  chunkBuildToken++;
+  for (const entry of chunkMeshes.values()) disposeEntry(entry);
+  chunkMeshes.clear();
+  const coords = getSortedChunkCoords(centerX, centerZ);
+  const initialRadius = Math.max(4, Math.ceil(renderDistance / CHUNK / 3));
+  const nearby = coords.filter((coord) => coord.d <= initialRadius);
+  const remaining = coords.filter((coord) => coord.d > initialRadius);
+  const total = Math.max(1, nearby.length);
+  for (let i = 0; i < nearby.length; i++) {
+    rebuildChunk(nearby[i].cx, nearby[i].cz);
+    if (i % 8 === 7 || i === nearby.length - 1) {
+      onProgress?.((i + 1) / total);
+      await nextFrame();
+    }
+  }
+  scheduleRemainingChunkBuild(remaining, chunkBuildToken);
+}
+
+function scheduleRemainingChunkBuild(coords, token) {
+  let index = 0;
+  const requestIdle = window.requestIdleCallback || ((callback) => setTimeout(() => callback({ timeRemaining: () => 8 }), 16));
+  function work(deadline) {
+    if (token !== chunkBuildToken || !world) return;
+    while (index < coords.length && deadline.timeRemaining() > 2) {
+      const coord = coords[index++];
+      rebuildChunk(coord.cx, coord.cz);
+    }
+    if (index < coords.length) requestIdle(work, { timeout: 100 });
+  }
+  requestIdle(work, { timeout: 100 });
 }
 
 // ブロック編集後、隣接チャンクの境界も含めて再構築
@@ -267,6 +318,8 @@ const chatState = {
   messages: [],
   allowed: [],
   collapsed: false,
+  socket: null,
+  socketRoomId: '',
 };
 const MAX_HP = 20;
 let playerHp = MAX_HP;
@@ -510,6 +563,7 @@ function makeCurrentState() {
     fly: player.fly,
     blockColors: { ...blockColorOverrides },
     blockTextures: { ...blockTextureOverrides },
+    worldEdits: world.exportEdits(),
     x: Number(player.pos.x.toFixed(3)),
     y: Number(player.pos.y.toFixed(3)),
     z: Number(player.pos.z.toFixed(3)),
@@ -541,7 +595,12 @@ function renderWorldList() {
     card.type = 'button';
     card.className = 'world-card';
     const presetLabel = PRESETS[worldInfo.preset]?.label || worldInfo.preset;
-    card.innerHTML = `<b>${worldInfo.name}</b><small>${presetLabel}</small>`;
+    const name = document.createElement('b');
+    name.textContent = worldInfo.name;
+    const preset = document.createElement('small');
+    preset.textContent = presetLabel;
+    card.appendChild(name);
+    card.appendChild(preset);
     card.addEventListener('click', () => enterWorld(worldInfo));
     box.appendChild(card);
   });
@@ -549,6 +608,7 @@ function renderWorldList() {
 
 function showTitleMenu() {
   activeWorldId = null;
+  closeChatSocket();
   touchPlayActive = false;
   clearMovementState();
   if (pointerLocked && document.exitPointerLock) document.exitPointerLock();
@@ -574,6 +634,7 @@ function createRandomWorld() {
     mode: gameMode,
     blockColors: {},
     blockTextures: {},
+    worldEdits: [],
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };
@@ -591,6 +652,7 @@ async function enterWorld(worldInfo) {
   const modeSelect = document.getElementById('game-mode-select');
   if (modeSelect) modeSelect.value = gameMode;
   await regenerate(worldInfo.preset, worldInfo.seed, worldInfo);
+  ensureChatSocket();
   resumeGame();
 }
 
@@ -2117,7 +2179,11 @@ function renderChat() {
   chatState.messages.slice(-60).forEach((message) => {
     const row = document.createElement('div');
     row.className = 'msg';
-    row.innerHTML = `<span class="name">${message.name}</span>: ${message.text}`;
+    const name = document.createElement('span');
+    name.className = 'name';
+    name.textContent = message.name;
+    row.appendChild(name);
+    row.append(document.createTextNode(`: ${message.text}`));
     log.appendChild(row);
   });
   log.scrollTop = log.scrollHeight;
@@ -2128,6 +2194,53 @@ function addChatMessage(name, text) {
   if (!cleanText) return;
   chatState.messages.push({ name: name.trim() || 'Player', text: cleanText, time: Date.now() });
   renderChat();
+}
+
+function getChatSignalUrl() {
+  return window.VOICE_SIGNAL_URL || localStorage.getItem('block_world_voice_signal_url') || '';
+}
+
+function closeChatSocket() {
+  if (chatState.socket) chatState.socket.close();
+  chatState.socket = null;
+  chatState.socketRoomId = '';
+}
+
+function ensureChatSocket() {
+  const url = getChatSignalUrl();
+  const roomId = activeWorldId || chatState.roomId;
+  if (!url || !roomId) return null;
+  if (chatState.socket?.readyState === WebSocket.OPEN && chatState.socketRoomId === roomId) return chatState.socket;
+  if (chatState.socket && chatState.socket.readyState !== WebSocket.CLOSED) closeChatSocket();
+  const socket = new WebSocket(url);
+  chatState.socket = socket;
+  chatState.socketRoomId = roomId;
+  socket.addEventListener('open', () => {
+    socket.send(JSON.stringify({ type: 'join', kind: 'chat', roomId, name: 'Player' }));
+  });
+  socket.addEventListener('message', (event) => {
+    try {
+      const message = JSON.parse(event.data);
+      if (message.type === 'chat') addChatMessage(message.name || 'Player', message.text || '');
+    } catch (err) {
+      console.warn('Chat message error', err);
+    }
+  });
+  socket.addEventListener('close', () => {
+    if (chatState.socket === socket) {
+      chatState.socket = null;
+      chatState.socketRoomId = '';
+    }
+  });
+  return socket;
+}
+
+function sendChatNetwork(text) {
+  const socket = ensureChatSocket();
+  if (!socket) return;
+  const send = () => socket.send(JSON.stringify({ type: 'chat', text }));
+  if (socket.readyState === WebSocket.OPEN) send();
+  else socket.addEventListener('open', send, { once: true });
 }
 
 function setupChatUI() {
@@ -2143,7 +2256,9 @@ function setupChatUI() {
   document.getElementById('chat-form').addEventListener('submit', (e) => {
     e.preventDefault();
     const input = document.getElementById('chat-input');
-    addChatMessage('Player', input.value);
+    const text = input.value;
+    addChatMessage('Player', text);
+    sendChatNetwork(text);
     input.value = '';
     input.blur();
   });
@@ -2151,7 +2266,7 @@ function setupChatUI() {
     chatState.collapsed = !chatState.collapsed;
     document.getElementById('chat-log').style.display = chatState.collapsed ? 'none' : 'block';
     document.getElementById('chat-form').style.display = chatState.collapsed ? 'none' : 'grid';
-    document.getElementById('btn-chat-collapse').textContent = chatState.collapsed ? '??' : '???';
+    document.getElementById('btn-chat-collapse').textContent = chatState.collapsed ? '表示' : '最小化';
   });
 }
 
@@ -2166,23 +2281,27 @@ async function regenerate(presetKey, seed = null, savedState = null, shouldSave 
   setLoadingProgress(0.18, '地形を生成中...');
   await nextFrame();
   world = generateWorld(presetKey, currentSeed);
+  if (savedState?.worldEdits) world.applyEdits(savedState.worldEdits);
+  world.trackEdits = true;
   applyBlockColorOverrides();
-  setLoadingProgress(0.35, 'ブロックを描画中...');
-  await rebuildAllChunksWithProgress((progress) => {
-    setLoadingProgress(0.35 + progress * 0.6, 'ブロックを描画中...');
-  });
   player.spawn(world);
   if (savedState) restorePlayerState(savedState);
   player.fly = false;
   if (savedState) player.fly = Boolean(savedState.fly && gameMode === 'creative');
   resetPlayerHp();
   if (savedState) restorePlayerState(savedState);
+  setLoadingProgress(0.35, '近くのブロックを描画中...');
+  await rebuildNearbyChunksWithProgress(player.pos.x, player.pos.z, (progress) => {
+    setLoadingProgress(0.35 + progress * 0.45, '近くのブロックを描画中...');
+  });
   updateHudMode();
   renderBlockColorSettingsUI();
   document.querySelectorAll('#presets button').forEach((btn) => {
     btn.classList.toggle('active', btn.dataset.preset === presetKey);
   });
   if (shouldSave) saveGameState(true);
+  setLoadingProgress(0.9, '遠くの地形を裏で準備中...');
+  await nextFrame();
   setLoadingProgress(1, '完了');
   await nextFrame();
   hideLoadingProgress();

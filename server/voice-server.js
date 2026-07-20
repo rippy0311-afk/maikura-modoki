@@ -24,7 +24,7 @@ function leave(socket) {
   const room = rooms.get(roomId);
   if (!room) return;
   room.delete(peerId);
-  broadcast(roomId, { type: 'peer-left', peerId });
+  if (socket.kind !== 'chat') broadcast(roomId, { type: 'peer-left', peerId });
   if (room.size === 0) rooms.delete(roomId);
 }
 
@@ -55,21 +55,37 @@ wss.on('connection', (socket) => {
       socket.roomId = roomId;
       socket.peerId = peerId;
       socket.name = String(message.name || 'Player').slice(0, 32);
+      socket.kind = message.kind === 'chat' ? 'chat' : 'voice';
 
       if (!rooms.has(roomId)) rooms.set(roomId, new Map());
       const room = rooms.get(roomId);
-      const peers = [...room.entries()].map(([id, peerSocket]) => ({
-        peerId: id,
-        name: peerSocket.name || 'Player',
-      }));
+      const peers = [...room.entries()]
+        .filter(([, peerSocket]) => peerSocket.kind !== 'chat')
+        .map(([id, peerSocket]) => ({
+          peerId: id,
+          name: peerSocket.name || 'Player',
+        }));
       room.set(peerId, socket);
 
       send(socket, { type: 'welcome', peerId, peers });
-      broadcast(roomId, { type: 'peer-joined', peerId, name: socket.name }, socket);
+      if (socket.kind !== 'chat') {
+        broadcast(roomId, { type: 'peer-joined', peerId, name: socket.name }, socket);
+      }
       return;
     }
 
     if (!socket.roomId || !socket.peerId) return;
+    if (message.type === 'chat') {
+      const text = String(message.text || '').trim().slice(0, 400);
+      if (!text) return;
+      broadcast(socket.roomId, {
+        type: 'chat',
+        name: socket.name || 'Player',
+        text,
+        time: Date.now(),
+      }, socket);
+      return;
+    }
     if (!['offer', 'answer', 'ice'].includes(message.type)) return;
     const target = rooms.get(socket.roomId)?.get(message.to);
     if (!target) return;

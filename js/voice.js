@@ -150,7 +150,7 @@ async function startVoice() {
     voiceState.localStream.getAudioTracks().forEach((track) => { track.enabled = !voiceState.muted; });
     voiceState.ws = new WebSocket(getVoiceSignalUrl());
     voiceState.ws.addEventListener('open', () => {
-      voiceSend({ type: 'join', roomId: voiceRoomId(), name: 'Player' });
+      voiceSend({ type: 'join', kind: 'voice', roomId: voiceRoomId(), name: 'Player' });
       setVoiceStatus('参加中...');
     });
     voiceState.ws.addEventListener('message', async (event) => {
