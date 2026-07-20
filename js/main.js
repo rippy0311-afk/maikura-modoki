@@ -740,11 +740,6 @@ function handleEscapeKey(e) {
     return;
   }
 
-  if (!pointerLocked && !touchPlayActive) {
-    resumeGame();
-    return;
-  }
-
   openPauseMenu();
 }
 
@@ -785,7 +780,7 @@ document.addEventListener('pointerlockchange', () => {
     return;
   }
   if (!pointerLocked && activeWorldId && panel.classList.contains('hidden')) {
-    openPauseMenu();
+    overlay.style.display = 'none';
     return;
   }
   if (!pointerLocked && panel.classList.contains('pause-open')) {
