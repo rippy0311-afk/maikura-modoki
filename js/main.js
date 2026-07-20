@@ -1016,6 +1016,84 @@ function getCreativeCatalogItems() {
   });
 }
 
+
+function getInventoryItemDefinition(id) {
+  const block = HOTBAR_BLOCKS.find((item) => String(item.id) === String(id));
+  if (block) return makeSlotItem(block.id, block.label, getBlockInventoryCount(block.id), getBlockDisplayColor(block.id));
+  const resource = RESOURCE_ITEMS.find((item) => item.id === id);
+  if (resource) return makeSlotItem(resource.id, resource.label, getInventoryCount(resource.id), resource.color);
+  const craftItem = CRAFT_ITEMS[id];
+  if (craftItem) return makeSlotItem(id, craftItem.label, getInventoryCount(id), craftItem.color);
+  const catalogItem = getCatalogItem(id);
+  if (catalogItem) return makeSlotItem(catalogItem.id, catalogItem.label, 1, catalogItem.color || '#8b8f98');
+  return null;
+}
+
+function normalizeSlotItem(item) {
+  if (!item) return null;
+  return getInventoryItemDefinition(item.id) || cloneSlotItem(item);
+}
+
+function getSlotArray(slotId) {
+  if (slotId.startsWith('hotbar-')) return { slots: hotbarSlots, index: Number(slotId.slice(7)) };
+  if (slotId.startsWith('main-')) return { slots: mainInventorySlots, index: Number(slotId.slice(5)) };
+  return null;
+}
+
+function getSlotItem(slotId) {
+  const target = getSlotArray(slotId);
+  if (!target || Number.isNaN(target.index)) return null;
+  return target.slots[target.index] || null;
+}
+
+function setSlotItem(slotId, item) {
+  const target = getSlotArray(slotId);
+  if (!target || Number.isNaN(target.index)) return false;
+  target.slots[target.index] = item ? normalizeSlotItem(item) : null;
+  return true;
+}
+
+function isMovableInventorySlot(slotId) {
+  return slotId.startsWith('hotbar-') || slotId.startsWith('main-');
+}
+
+function syncMainInventorySlots() {
+  for (let i = 0; i < mainInventorySlots.length; i++) {
+    const item = mainInventorySlots[i];
+    if (!item) continue;
+    const count = gameMode === 'survival' ? getInventoryCount(item.id) : 1;
+    mainInventorySlots[i] = count > 0 ? normalizeSlotItem(item) : null;
+  }
+  if (gameMode !== 'survival') return;
+
+  const ownedItems = HOTBAR_BLOCKS.map((item) => getInventoryItemDefinition(item.id))
+    .concat(RESOURCE_ITEMS.map((item) => getInventoryItemDefinition(item.id)))
+    .concat(Object.keys(CRAFT_ITEMS).map((itemId) => getInventoryItemDefinition(itemId)))
+    .filter((item) => item && item.count > 0);
+
+  ownedItems.forEach((item) => {
+    if (mainInventorySlots.some((slot) => slot && String(slot.id) === String(item.id))) return;
+    if (hotbarSlots.some((slot) => slot && String(slot.id) === String(item.id))) return;
+    const empty = mainInventorySlots.indexOf(null);
+    if (empty >= 0) mainInventorySlots[empty] = item;
+  });
+}
+
+function moveInventorySlot(sourceSlotId, targetSlotId, item) {
+  if (!isMovableInventorySlot(targetSlotId)) return false;
+  const sourceIsMovable = sourceSlotId && isMovableInventorySlot(sourceSlotId);
+  const sourceItem = sourceIsMovable ? getSlotItem(sourceSlotId) : normalizeSlotItem(item);
+  if (!sourceItem || sourceSlotId === targetSlotId) return false;
+  const targetItem = getSlotItem(targetSlotId);
+  setSlotItem(targetSlotId, sourceItem);
+  if (sourceIsMovable) setSlotItem(sourceSlotId, targetItem);
+  if (targetSlotId.startsWith('hotbar-')) selectHotbar(Number(targetSlotId.slice(7)));
+  buildHotbar();
+  renderInventoryScreen();
+  saveGameState(true);
+  return true;
+}
+
 function renderMcSlot(parent, item = null, slotId = '', onSelect = null) {
   const slot = document.createElement('div');
   slot.className = 'mc-slot' + (slotId && selectedInventorySlot === slotId ? ' selected' : '');
