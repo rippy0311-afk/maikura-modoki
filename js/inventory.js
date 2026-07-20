@@ -4,7 +4,9 @@ let hotbarIndex = 0;
 let selectedToolIndex = 0;
 
 const HOTBAR_SIZE = 9;
+const MAIN_INVENTORY_SIZE = 27;
 const hotbarSlots = Array(HOTBAR_SIZE).fill(null);
+const mainInventorySlots = Array(MAIN_INVENTORY_SIZE).fill(null);
 
 const SURVIVAL_TOOLS = [
   { id: 'pickaxe', label: '鉄のツルハシ', targets: '石・鉱石' },
