@@ -1199,7 +1199,7 @@ function renderInventoryScreen() {
     const item = hotbarSlots[i];
     renderMcSlot(
       hotbarGrid,
-      item ? makeSlotItem(item.id, item.label, gameMode === 'survival' && typeof item.id === 'number' ? getBlockInventoryCount(item.id) : 1, typeof item.id === 'number' ? getBlockDisplayColor(item.id) : item.color) : null,
+      item ? makeSlotItem(item.id, item.label, gameMode === 'survival' ? getInventoryCount(item.id) : 1, typeof item.id === 'number' ? getBlockDisplayColor(item.id) : item.color) : null,
       `hotbar-${i}`,
       () => selectHotbar(i)
     );
@@ -1563,8 +1563,9 @@ function buildHotbar() {
     const slot = document.createElement('div');
     slot.className = 'slot' + (i === hotbarIndex ? ' selected' : '');
     const itemColor = item && typeof item.id === 'number' ? getBlockDisplayColor(item.id) : item?.color;
+    const itemCount = item && gameMode === 'survival' ? getInventoryCount(item.id) : '?';
     slot.innerHTML = item
-      ? `<span class="key">${i + 1}</span><span class="swatch" style="${swatchStyle(item.id, itemColor)}"></span><span class="name">${item.label}</span><span class="count">${gameMode === 'survival' && typeof item.id === 'number' ? getBlockInventoryCount(item.id) : '?'}</span>`
+      ? `<span class="key">${i + 1}</span><span class="swatch" style="${swatchStyle(item.id, itemColor)}"></span><span class="name">${item.label}</span><span class="count">${itemCount}</span>`
       : `<span class="key">${i + 1}</span><span class="name">?</span><span class="count"></span>`;
     slot.addEventListener('click', () => selectHotbar(i));
     bar.appendChild(slot);
