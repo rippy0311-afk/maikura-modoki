@@ -524,6 +524,7 @@ function restorePlayerState(saved) {
   player.yaw = saved.yaw;
   player.pitch = saved.pitch;
   player.fly = Boolean(saved.fly && saved.mode === 'creative');
+  restoreArmorState(saved.armor);
   playerHp = Math.max(1, Math.min(MAX_HP, Number(saved.hp) || MAX_HP));
   updateHpUI();
   return true;
@@ -560,6 +561,7 @@ function makeCurrentState() {
     seed: currentSeed,
     mode: gameMode,
     hp: playerHp,
+    armor: getArmorState(),
     fly: player.fly,
     blockColors: { ...blockColorOverrides },
     blockTextures: { ...blockTextureOverrides },
@@ -914,142 +916,6 @@ window.addEventListener('blur', () => {
 });
 
 /* ============ ブロックの破壊・設置 ============ */
-let hotbarIndex = 0;
-let selectedToolIndex = 0;
-const HOTBAR_SIZE = 9;
-const hotbarSlots = Array(HOTBAR_SIZE).fill(null);
-
-const SURVIVAL_TOOLS = [
-  { id: 'pickaxe', label: '鉄のツルハシ', targets: '石・鉱石' },
-  { id: 'axe', label: '鉄の斧', targets: '木材' },
-  { id: 'shovel', label: '鉄のシャベル', targets: '土・砂・雪' },
-  { id: 'hoe', label: '鉄のクワ', targets: '畑づくり' },
-  { id: 'sword', label: '鉄の剣', targets: '戦闘' },
-  { id: 'shears', label: 'ハサミ', targets: '葉' },
-];
-
-// 装備スロット順。実体は CRAFT_ITEMS 側で定義され、所持数は survivalInventory が持つ。
-const ARMOR_ITEM_IDS = ['iron_helmet', 'iron_chestplate', 'iron_leggings', 'iron_boots'];
-
-const survivalInventory = {};
-for (const item of HOTBAR_BLOCKS) survivalInventory[item.id] = 0;
-
-const RESOURCE_ITEMS = [
-  { id: 'wood', label: '木', color: '#8a6238' },
-  { id: 'stone', label: '石', color: '#7d7d7d' },
-  { id: 'coal_ore', label: '石炭鉱石', color: '#2a2a2e' },
-  { id: 'iron_ore', label: '鉄鉱石', color: '#cd8a59' },
-  { id: 'gold_ore', label: '金鉱石', color: '#eec23e' },
-];
-for (const item of RESOURCE_ITEMS) survivalInventory[item.id] = 0;
-
-const RESOURCE_DROPS = {
-  [BLOCK.LOG]: 'wood',
-  // 木材(PLANK)は wood を落とさない。落とすと wood→木材→壊す→wood が増殖レシピになる。
-  [BLOCK.STONE]: 'stone',
-  [BLOCK.COAL_ORE]: 'coal_ore',
-  [BLOCK.IRON_ORE]: 'iron_ore',
-  [BLOCK.GOLD_ORE]: 'gold_ore',
-};
-
-const CUSTOM_BREAK_BLOCKS = [
-  { id: BLOCK.GRASS, label: '草' },
-  { id: BLOCK.DIRT, label: '土' },
-  { id: BLOCK.STONE, label: '石' },
-  { id: BLOCK.SAND, label: '砂' },
-  { id: BLOCK.LOG, label: '原木' },
-  { id: BLOCK.LEAVES, label: '葉' },
-  { id: BLOCK.SNOW, label: '雪' },
-  { id: BLOCK.PLANK, label: '木材' },
-  { id: BLOCK.BRICK, label: 'レンガ' },
-  { id: BLOCK.COAL_ORE, label: '石炭鉱石' },
-  { id: BLOCK.IRON_ORE, label: '鉄鉱石' },
-  { id: BLOCK.GOLD_ORE, label: '金鉱石' },
-  { id: BLOCK.CHEST, label: 'チェスト' },
-  { id: BLOCK.ITEM_NODE, label: 'アイテム鉱石' },
-];
-
-const DRAGON_KIT_CATEGORIES = [
-  {
-    title: '装備',
-    items: [
-      { id: 'diamond_helmet', label: 'ダイヤヘルメット', count: 1 },
-      { id: 'diamond_chestplate', label: 'ダイヤチェスト', count: 1 },
-      { id: 'diamond_leggings', label: 'ダイヤレギンス', count: 1 },
-      { id: 'diamond_boots', label: 'ダイヤブーツ', count: 1 },
-      { id: 'shield', label: '盾', count: 1 },
-      { id: 'elytra', label: 'エリトラ', count: 1 },
-    ],
-  },
-  {
-    title: '武器・道具',
-    items: [
-      { id: 'diamond_sword', label: 'ダイヤの剣', count: 1 },
-      { id: 'bow', label: '弓', count: 1 },
-      { id: 'crossbow', label: 'クロスボウ', count: 1 },
-      { id: 'arrow', label: '矢', count: 64 },
-      { id: 'diamond_pickaxe', label: 'ダイヤツルハシ', count: 1 },
-      { id: 'diamond_axe', label: 'ダイヤの斧', count: 1 },
-    ],
-  },
-  {
-    title: 'バケツ・移動',
-    items: [
-      { id: 'water_bucket', label: '水入りバケツ', count: 2 },
-      { id: 'lava_bucket', label: '溶岩バケツ', count: 1 },
-      { id: 'empty_bucket', label: '空バケツ', count: 1 },
-      { id: 'boat', label: 'ボート', count: 1 },
-      { id: 'building_blocks', label: '足場ブロック', count: 128 },
-      { id: 'ladder', label: 'はしご', count: 32 },
-    ],
-  },
-  {
-    title: 'ネザー系',
-    items: [
-      { id: 'obsidian', label: '黒曜石', count: 14 },
-      { id: 'flint_steel', label: '火打石と打ち金', count: 1 },
-      { id: 'blaze_rod', label: 'ブレイズロッド', count: 8 },
-      { id: 'blaze_powder', label: 'ブレイズパウダー', count: 16 },
-      { id: 'nether_wart', label: 'ネザーウォート', count: 16 },
-      { id: 'soul_sand', label: 'ソウルサンド', count: 8 },
-    ],
-  },
-  {
-    title: 'エンド系',
-    items: [
-      { id: 'ender_pearl', label: 'エンダーパール', count: 16 },
-      { id: 'eye_of_ender', label: 'エンダーアイ', count: 12 },
-      { id: 'ender_chest', label: 'エンダーチェスト', count: 1 },
-      { id: 'chorus_fruit', label: 'コーラスフルーツ', count: 16 },
-      { id: 'end_crystal', label: 'エンドクリスタル', count: 4 },
-      { id: 'dragon_breath', label: 'ドラゴンブレス瓶', count: 4 },
-    ],
-  },
-  {
-    title: 'ポーション・食料',
-    items: [
-      { id: 'brewing_stand', label: '醸造台', count: 1 },
-      { id: 'glass_bottle', label: 'ガラス瓶', count: 6 },
-      { id: 'slow_falling_potion', label: '低速落下ポーション', count: 3 },
-      { id: 'strength_potion', label: '力のポーション', count: 2 },
-      { id: 'healing_potion', label: '治癒ポーション', count: 3 },
-      { id: 'golden_apple', label: '金のリンゴ', count: 8 },
-    ],
-  },
-  {
-    title: 'その他',
-    items: [
-      { id: 'bed', label: 'ベッド', count: 6 },
-      { id: 'torch', label: 'たいまつ', count: 64 },
-      { id: 'compass', label: 'コンパス', count: 1 },
-      { id: 'map', label: '地図', count: 1 },
-      { id: 'crafting_table', label: '作業台', count: 1 },
-      { id: 'furnace', label: 'かまど', count: 1 },
-    ],
-  },
-];
-for (const itemId of Object.keys(CRAFT_ITEMS)) survivalInventory[itemId] = 0;
-
 function gameModeLabel() {
   return gameMode === 'survival' ? 'サバイバル' : 'クリエイティブ';
 }
@@ -1064,7 +930,8 @@ function resetPlayerHp() {
 
 function damagePlayer(amount) {
   if (gameMode !== 'survival' || damageCooldown > 0) return;
-  playerHp = Math.max(0, playerHp - amount);
+  const actualDamage = reduceDamageByArmor(amount);
+  playerHp = Math.max(0, playerHp - actualDamage);
   damageCooldown = 0.6;
   updateHpUI();
   if (playerHp <= 0) {
@@ -1131,32 +998,6 @@ function updateSurvivalStats(dt) {
   } else {
     regenTimer = 0;
   }
-}
-
-function getBlockInventoryCount(blockId) {
-  return survivalInventory[blockId] || 0;
-}
-
-function getInventoryCount(itemId) {
-  return survivalInventory[itemId] || 0;
-}
-
-function makeSlotItem(id, label, count, color = '#8b8f98') {
-  return { id, label, count, color };
-}
-
-function cloneSlotItem(item, count = 1) {
-  if (!item) return null;
-  return {
-    id: item.id,
-    label: item.label,
-    count,
-    color: item.color || '#8b8f98',
-  };
-}
-
-function getDragonKitItem(id) {
-  return null;
 }
 
 function getCatalogItem(id) {
@@ -1251,8 +1092,19 @@ function renderInventoryScreen() {
   const armorGrid = document.getElementById('armor-grid');
   armorGrid.innerHTML = '';
   ARMOR_ITEM_IDS.forEach((itemId, i) => {
-    const item = CRAFT_ITEMS[itemId];
-    renderMcSlot(armorGrid, makeSlotItem(itemId, item.label, getInventoryCount(itemId), item.color), `armor-${i}`, () => {});
+    const equippedItemId = equippedArmor[i];
+    const item = equippedItemId ? CRAFT_ITEMS[equippedItemId] : null;
+    renderMcSlot(
+      armorGrid,
+      item ? makeSlotItem(equippedItemId, `${ARMOR_SLOT_LABELS[i]}: ${item.label}`, 1, item.color) : makeSlotItem(itemId, ARMOR_SLOT_LABELS[i], 0, '#4b5563'),
+      `armor-${i}`,
+      () => {
+        if (!unequipArmor(i)) return;
+        updateSurvivalUI();
+        renderInventoryScreen();
+        saveGameState(true);
+      }
+    );
   });
 
   const offhand = document.getElementById('offhand-slot');
@@ -1265,6 +1117,11 @@ function renderInventoryScreen() {
   mainGrid.innerHTML = '';
   const mainItems = getMainInventoryItems();
   for (let i = 0; i < 27; i++) renderMcSlot(mainGrid, mainItems[i] || null, `main-${i}`, (item) => {
+    if (item && getArmorSlotIndex(item.id) >= 0 && equipArmor(item.id)) {
+      updateSurvivalUI();
+      saveGameState(true);
+      return;
+    }
     selectedInventoryItem = item;
   });
 
@@ -1360,16 +1217,16 @@ function ensureCreativeHotbar() {
 function addBlockToInventory(blockId, amount) {
   if (blockId === BLOCK.AIR || blockId === BLOCK.WATER || blockId === BLOCK.COLOR ||
       blockId === BLOCK.CHEST || blockId === BLOCK.ITEM_NODE || blockId === BLOCK.BEDROCK) return;
-  survivalInventory[blockId] = getBlockInventoryCount(blockId) + amount;
+  addInventoryCount(blockId, amount);
   autoAssignHotbarSlot(blockId);
   const resourceId = RESOURCE_DROPS[blockId];
-  if (resourceId) survivalInventory[resourceId] = getInventoryCount(resourceId) + amount;
+  if (resourceId) addInventoryCount(resourceId, amount);
   updateSurvivalUI();
   if (inventoryOpen) renderInventoryScreen();
 }
 
 function addItemToInventory(itemId, amount) {
-  survivalInventory[itemId] = getInventoryCount(itemId) + amount;
+  addInventoryCount(itemId, amount);
   updateSurvivalUI();
   if (inventoryOpen) renderInventoryScreen();
 }
@@ -1428,10 +1285,6 @@ function collectMinedDrop(blockId, x, y, z) {
     if (dropBlockId !== null) addBlockToInventory(dropBlockId, 1);
     else warnMissingTool(blockId);
   }
-}
-
-function getSelectedCustomItem() {
-  return null;
 }
 
 function getSelectedPlaceBlockId() {
@@ -1533,7 +1386,7 @@ function consumeSelectedBlock() {
   const blockId = item.id;
   const count = getBlockInventoryCount(blockId);
   if (count <= 0) return false;
-  survivalInventory[blockId] = count - 1;
+  setInventoryCount(blockId, count - 1);
   updateSurvivalUI();
   if (inventoryOpen) renderInventoryScreen();
   buildHotbar();
@@ -1685,11 +1538,25 @@ function buildSurvivalUI() {
 
   const armor = document.getElementById('armor-list');
   armor.innerHTML = '';
-  ARMOR_ITEM_IDS.forEach((itemId) => {
+  ARMOR_ITEM_IDS.forEach((itemId, slotIndex) => {
     const count = getInventoryCount(itemId);
+    const equipped = equippedArmor[slotIndex] === itemId;
     const item = document.createElement('div');
-    item.className = 'item' + (count > 0 ? '' : ' unowned');
-    item.innerHTML = `<span>${CRAFT_ITEMS[itemId].label}</span><span class="count">${count}</span>`;
+    item.className = 'item' + (count > 0 || equipped ? '' : ' unowned');
+    const label = document.createElement('span');
+    label.textContent = `${ARMOR_SLOT_LABELS[slotIndex]}: ${CRAFT_ITEMS[itemId].label}`;
+    const status = document.createElement('span');
+    status.className = 'count';
+    status.textContent = equipped ? '装備中' : count;
+    item.appendChild(label);
+    item.appendChild(status);
+    item.addEventListener('click', () => {
+      const changed = equipped ? unequipArmor(slotIndex) : equipArmor(itemId);
+      if (!changed) return;
+      updateSurvivalUI();
+      if (inventoryOpen) renderInventoryScreen();
+      saveGameState(true);
+    });
     armor.appendChild(item);
   });
 }

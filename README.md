@@ -9,9 +9,10 @@ Minecraft風のブラウザ3Dブロックゲームです。GitHub Pagesで公開
 - ブロックの破壊・設置・インベントリー
 - ワールド別のブロック見た目編集
 - 編集したブロック差分の保存
-- HP、クラフト、描画距離設定
+- HP、防具、クラフト、描画距離設定
 - iPad向けタッチ操作
 - WebRTC方式のボイスチャット
+- 同じ信号サーバーを使うテキストチャット共有
 
 ## 公開
 
@@ -22,21 +23,29 @@ Minecraft風のブラウザ3Dブロックゲームです。GitHub Pagesで公開
 - `index.html`: 画面UIと読み込み順
 - `libs/three.min.js`: Three.js
 - `js/blocks.js`: ブロック定義とテクスチャアトラス
-- `js/world.js`: ワールド生成、洞窟、チャンクメッシュ
+- `js/world.js`: ワールド生成、洞窟、チャンクメッシュ、編集差分
 - `js/player.js`: プレイヤー移動と当たり判定
 - `js/crafting.js`: クラフト定義
+- `js/inventory.js`: ホットバー、所持数、防具、リソース定義
 - `js/main.js`: ゲーム本体、UI、保存、入力
-- `server/voice-server.js`: ボイスチャット用のWebRTC信号サーバー
+- `server/voice-server.js`: ボイスチャットとテキストチャット用の信号サーバー
 
-## Auto push
+## Auto Push
 
-`scripts/start-auto-push.bat` を起動すると、ファイル変更を検知して自動で `git add -A`、`git commit`、`git pull --rebase`、`git push` を実行します。
+変更をGitHubへ自動反映したい場合は、Node版のウォッチャーを使います。
 
-共同編集で衝突した場合は `.auto-push.log` にエラーを書いて停止します。衝突を直してから、もう一度 `scripts/start-auto-push.bat` を起動してください。
+```bash
+npm install
+npm run auto-push
+```
 
-## Voice chat
+Windowsでは `scripts/start-auto-push.bat`、macOS / Linuxでは `scripts/start-auto-push.sh` からも起動できます。
 
-ゲーム内ボイスチャットは WebRTC を使います。GitHub Pages だけでは通話相手を探せないため、別サーバーで `server/voice-server.js` を起動してください。
+共同編集で衝突した場合は `.auto-push.log` にエラーを書きます。衝突を直してから、もう一度ウォッチャーを起動してください。
+
+## Voice / Chat Server
+
+ゲーム内ボイスチャットと共有チャットは WebRTC / WebSocket を使います。GitHub Pages だけでは相手を探せないため、別サーバーで `server/voice-server.js` を起動してください。
 
 ローカル確認:
 

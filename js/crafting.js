@@ -1,18 +1,14 @@
 'use strict';
 
 // クラフトで手に入る「ブロック以外のアイテム」の定義。
-//
-// survivalInventory の所持数は、ブロックなら数値のブロックID、それ以外なら
-// ここで定義した文字列IDをキーにして持つ。JS のオブジェクトキーは常に文字列
-// なので survivalInventory[BLOCK.PLANK] と survivalInventory['10'] は同一で、
-// 両者を同じ getInventoryCount() で引ける。
+// 所持数の実体は js/inventory.js のヘルパー経由で扱う。
 const CRAFT_ITEMS = {
   stick:      { label: '棒',           color: '#9a7b4f' },
   iron_ingot: { label: '鉄インゴット', color: '#d8d8d8' },
 
-  wooden_pickaxe: { label: '木のツルハシ', color: '#a98a5c', tool: 'pickaxe' },
-  wooden_axe:     { label: '木の斧',       color: '#a98a5c', tool: 'axe' },
-  wooden_shovel:  { label: '木のシャベル', color: '#a98a5c', tool: 'shovel' },
+  wooden_pickaxe: { label: '木のツルハシ',   color: '#a98a5c', tool: 'pickaxe' },
+  wooden_axe:     { label: '木の斧',         color: '#a98a5c', tool: 'axe' },
+  wooden_shovel:  { label: '木のシャベル',   color: '#a98a5c', tool: 'shovel' },
 
   iron_pickaxe: { label: '鉄のツルハシ', color: '#cdd2d6', tool: 'pickaxe' },
   iron_axe:     { label: '鉄の斧',       color: '#cdd2d6', tool: 'axe' },
@@ -21,13 +17,12 @@ const CRAFT_ITEMS = {
   iron_sword:   { label: '鉄の剣',       color: '#cdd2d6', tool: 'sword' },
   shears:       { label: 'ハサミ',       color: '#cdd2d6', tool: 'shears' },
 
-  iron_helmet:     { label: '鉄のヘルメット',       color: '#bfc5c9', armor: 0 },
-  iron_chestplate: { label: '鉄のチェストプレート', color: '#bfc5c9', armor: 1 },
-  iron_leggings:   { label: '鉄のレギンス',         color: '#bfc5c9', armor: 2 },
-  iron_boots:      { label: '鉄のブーツ',           color: '#bfc5c9', armor: 3 },
+  iron_helmet:     { label: '鉄のヘルメット',       color: '#bfc5c9', armor: 0, armorDefense: 2 },
+  iron_chestplate: { label: '鉄のチェストプレート', color: '#bfc5c9', armor: 1, armorDefense: 6 },
+  iron_leggings:   { label: '鉄のレギンス',         color: '#bfc5c9', armor: 2, armorDefense: 5 },
+  iron_boots:      { label: '鉄のブーツ',           color: '#bfc5c9', armor: 3, armorDefense: 2 },
 };
 
-// 役割ごとの候補。前にあるものほど高性能で、所持している中で最初のものが使われる。
 const TOOL_TIERS = {
   pickaxe: ['iron_pickaxe', 'wooden_pickaxe'],
   axe:     ['iron_axe', 'wooden_axe'],
@@ -37,8 +32,6 @@ const TOOL_TIERS = {
   shears:  ['shears'],
 };
 
-// 簡易レシピ。2x2 グリッドに並べるのではなく、材料が揃っていればボタンで作れる。
-// input のキーはブロックIDでもアイテムIDでもよい(どちらも同じ所持数表を引く)。
 const RECIPES = [
   { input: { wood: 1 },                          output: { block: BLOCK.PLANK, count: 4 } },
   { input: { [BLOCK.PLANK]: 2 },                 output: { item: 'stick', count: 4 } },
@@ -63,7 +56,6 @@ const RECIPES = [
   { input: { stone: 4 },                         output: { block: BLOCK.BRICK, count: 1 } },
 ];
 
-// 所持数表のキー(ブロックID / アイテムID の両方)から表示名と色を引く。
 function craftKeyLabel(key) {
   if (CRAFT_ITEMS[key]) return CRAFT_ITEMS[key].label;
   const resource = RESOURCE_ITEMS.find((item) => item.id === key);
@@ -102,7 +94,7 @@ function canCraft(recipe) {
 function craft(recipe) {
   if (!canCraft(recipe)) return false;
   for (const [key, need] of Object.entries(recipe.input)) {
-    survivalInventory[key] = getInventoryCount(key) - need;
+    addInventoryCount(key, -need);
   }
   if (recipe.output.block !== undefined) {
     addBlockToInventory(recipe.output.block, recipe.output.count);
@@ -112,7 +104,6 @@ function craft(recipe) {
   return true;
 }
 
-// その役割で実際に使えるツール(所持しているもの)。無ければ null。
 function ownedToolItem(role) {
   const tiers = TOOL_TIERS[role] || [];
   return tiers.find((itemId) => getInventoryCount(itemId) > 0) || null;

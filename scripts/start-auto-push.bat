@@ -1,3 +1,3 @@
 @echo off
 cd /d "%~dp0.."
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0auto-push.ps1"
+node "%~dp0auto-push.js"

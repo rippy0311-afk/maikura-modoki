@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "start:voice": "node server/voice-server.js"
+    "start:voice": "node server/voice-server.js",
+    "auto-push": "node scripts/auto-push.js"
   },
   "dependencies": {
     "ws": "^8.18.0"
