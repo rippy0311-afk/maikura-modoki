@@ -525,6 +525,7 @@ function restorePlayerState(saved) {
   player.pitch = saved.pitch;
   player.fly = Boolean(saved.fly && saved.mode === 'creative');
   restoreArmorState(saved.armor);
+  restoreInventoryLayoutState(saved.inventoryLayout);
   playerHp = Math.max(1, Math.min(MAX_HP, Number(saved.hp) || MAX_HP));
   updateHpUI();
   return true;
@@ -562,6 +563,7 @@ function makeCurrentState() {
     mode: gameMode,
     hp: playerHp,
     armor: getArmorState(),
+    inventoryLayout: getInventoryLayoutState(),
     fly: player.fly,
     blockColors: { ...blockColorOverrides },
     blockTextures: { ...blockTextureOverrides },
