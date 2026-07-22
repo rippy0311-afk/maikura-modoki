@@ -849,8 +849,13 @@ document.addEventListener('pointerlockchange', () => {
     suppressPauseAfterInventoryClose = false;
     return;
   }
-  if (!pointerLocked && activeWorldId && panel.classList.contains('hidden')) {
+  if (suppressPauseOnPointerUnlock) {
+    suppressPauseOnPointerUnlock = false;
     overlay.style.display = 'none';
+    return;
+  }
+  if (!pointerLocked && activeWorldId && panel.classList.contains('hidden')) {
+    openPauseMenu();
     return;
   }
   if (!pointerLocked && panel.classList.contains('pause-open')) {
