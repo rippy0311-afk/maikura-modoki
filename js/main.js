@@ -825,7 +825,10 @@ function openChatInput(prefill = '') {
   if (chatForm) chatForm.style.display = 'grid';
   if (collapseButton) collapseButton.textContent = '最小化';
   miningHeld = false;
-  if (pointerLocked && document.exitPointerLock) document.exitPointerLock();
+  if (pointerLocked && document.exitPointerLock) {
+    suppressPauseOnPointerUnlock = true;
+    document.exitPointerLock();
+  }
   input.value = prefill;
   setTimeout(() => {
     input.focus();
