@@ -311,6 +311,7 @@ let lastKeyTapTime = 0;
 let inventoryOpen = false;
 let openingInventory = false;
 let suppressPauseAfterInventoryClose = false;
+let suppressPauseOnPointerUnlock = false;
 let selectedInventorySlot = 'hotbar-0';
 let selectedInventoryItem = null;
 const chatState = {
