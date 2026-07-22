@@ -1042,12 +1042,21 @@ function getInventoryItemDefinition(id) {
 
 function normalizeSlotItem(item) {
   if (!item) return null;
-  return getInventoryItemDefinition(item.id) || cloneSlotItem(item);
+  const definition = getInventoryItemDefinition(item.id);
+  if (!definition) return cloneSlotItem(item);
+  if (definition.count <= 0 && item.count > 0) definition.count = item.count;
+  return definition;
 }
 
 function getSlotArray(slotId) {
-  if (slotId.startsWith('hotbar-')) return { slots: hotbarSlots, index: Number(slotId.slice(7)) };
-  if (slotId.startsWith('main-')) return { slots: mainInventorySlots, index: Number(slotId.slice(5)) };
+  if (slotId.startsWith('hotbar-')) {
+    const index = Number(slotId.slice(7));
+    return index >= 0 && index < HOTBAR_SIZE ? { slots: hotbarSlots, index } : null;
+  }
+  if (slotId.startsWith('main-')) {
+    const index = Number(slotId.slice(5));
+    return index >= 0 && index < MAIN_INVENTORY_SIZE ? { slots: mainInventorySlots, index } : null;
+  }
   return null;
 }
 
@@ -1073,7 +1082,7 @@ function syncMainInventorySlots() {
     const item = mainInventorySlots[i];
     if (!item) continue;
     const count = gameMode === 'survival' ? getInventoryCount(item.id) : 1;
-    mainInventorySlots[i] = count > 0 ? normalizeSlotItem(item) : null;
+    mainInventorySlots[i] = count > 0 ? normalizeSlotItem(item) : cloneSlotItem(item);
   }
   if (gameMode !== 'survival') return;
 
