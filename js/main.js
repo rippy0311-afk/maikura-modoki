@@ -541,7 +541,10 @@ function saveGameState(force = false) {
   if (!force && encoded === lastSavedPayload) return;
   lastSavedPayload = encoded;
   try {
-    if (encoded.length > SAVE_CHUNK_SIZE) writeChunkedSave(encoded);
+    if (encoded.length > SAVE_CHUNK_SIZE) {
+      localStorage.removeItem(SAVE_COOKIE_NAME);
+      writeChunkedSave(encoded);
+    }
     else {
       clearChunkedSave();
       localStorage.setItem(SAVE_COOKIE_NAME, encoded);
