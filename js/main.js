@@ -328,6 +328,9 @@ let damageCooldown = 0;
 let breathTimer = 0;
 let regenTimer = 0;
 const SAVE_COOKIE_NAME = 'block_world_save';
+const SAVE_CHUNK_PREFIX = `${SAVE_COOKIE_NAME}_chunk_`;
+const SAVE_CHUNK_COUNT_KEY = `${SAVE_COOKIE_NAME}_chunk_count`;
+const SAVE_CHUNK_SIZE = 250000;
 const WORLD_LIST_STORAGE = 'block_world_worlds';
 const VISUAL_SHADOWS_STORAGE = 'block_world_visual_shadows';
 let lastSaveTime = 0;
@@ -488,8 +491,35 @@ function getSaveCookie() {
     ?.slice(SAVE_COOKIE_NAME.length + 1);
 }
 
+function clearChunkedSave() {
+  const count = Number(localStorage.getItem(SAVE_CHUNK_COUNT_KEY)) || 0;
+  for (let i = 0; i < count; i++) localStorage.removeItem(`${SAVE_CHUNK_PREFIX}${i}`);
+  localStorage.removeItem(SAVE_CHUNK_COUNT_KEY);
+}
+
+function writeChunkedSave(value) {
+  clearChunkedSave();
+  const count = Math.ceil(value.length / SAVE_CHUNK_SIZE);
+  for (let i = 0; i < count; i++) {
+    localStorage.setItem(`${SAVE_CHUNK_PREFIX}${i}`, value.slice(i * SAVE_CHUNK_SIZE, (i + 1) * SAVE_CHUNK_SIZE));
+  }
+  localStorage.setItem(SAVE_CHUNK_COUNT_KEY, String(count));
+}
+
+function readChunkedSave() {
+  const count = Number(localStorage.getItem(SAVE_CHUNK_COUNT_KEY)) || 0;
+  if (!count) return '';
+  const chunks = [];
+  for (let i = 0; i < count; i++) {
+    const chunk = localStorage.getItem(`${SAVE_CHUNK_PREFIX}${i}`);
+    if (typeof chunk !== 'string') return '';
+    chunks.push(chunk);
+  }
+  return chunks.join('');
+}
+
 function loadSavedGame() {
-  const raw = getSaveCookie() || localStorage.getItem(SAVE_COOKIE_NAME);
+  const raw = readChunkedSave() || localStorage.getItem(SAVE_COOKIE_NAME) || getSaveCookie();
   if (!raw) return null;
   try {
     const data = JSON.parse(decodeURIComponent(raw));
@@ -510,7 +540,14 @@ function saveGameState(force = false) {
   const encoded = encodeURIComponent(JSON.stringify(state));
   if (!force && encoded === lastSavedPayload) return;
   lastSavedPayload = encoded;
-  localStorage.setItem(SAVE_COOKIE_NAME, encoded);
+  try {
+    localStorage.setItem(SAVE_COOKIE_NAME, encoded);
+    if (encoded.length > SAVE_CHUNK_SIZE) writeChunkedSave(encoded);
+    else clearChunkedSave();
+  } catch (err) {
+    console.warn('Local save is too large, falling back to chunked save', err);
+    writeChunkedSave(encoded);
+  }
   if (encoded.length < 3800 && (force || now - lastCookieSaveTime > 30000)) {
     setSaveCookie(encoded);
     lastCookieSaveTime = now;
