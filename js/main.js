@@ -541,11 +541,14 @@ function saveGameState(force = false) {
   if (!force && encoded === lastSavedPayload) return;
   lastSavedPayload = encoded;
   try {
-    localStorage.setItem(SAVE_COOKIE_NAME, encoded);
     if (encoded.length > SAVE_CHUNK_SIZE) writeChunkedSave(encoded);
-    else clearChunkedSave();
+    else {
+      clearChunkedSave();
+      localStorage.setItem(SAVE_COOKIE_NAME, encoded);
+    }
   } catch (err) {
     console.warn('Local save is too large, falling back to chunked save', err);
+    localStorage.removeItem(SAVE_COOKIE_NAME);
     writeChunkedSave(encoded);
   }
   if (encoded.length < 3800 && (force || now - lastCookieSaveTime > 30000)) {
