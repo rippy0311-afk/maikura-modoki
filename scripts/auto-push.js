@@ -8,11 +8,12 @@ const { execFileSync } = require('child_process');
 const repo = path.resolve(__dirname, '..');
 const logPath = path.join(repo, '.auto-push.log');
 const lockPath = path.join(repo, '.auto-push.lock');
+const pidPath = path.join(repo, '.auto-push.pid');
 const pollMs = Number(process.env.AUTO_PUSH_POLL_MS || 3000);
 const debounceMs = Number(process.env.AUTO_PUSH_DEBOUNCE_MS || 1200);
 
 const ignoreDirs = new Set(['.git', 'node_modules', '.claude']);
-const ignoreFiles = new Set(['.auto-push.log', '.auto-push.lock']);
+const ignoreFiles = new Set(['.auto-push.log', '.auto-push.lock', '.auto-push.pid']);
 
 let lastSnapshot = '';
 let timer = null;
@@ -30,6 +31,36 @@ function git(args) {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
   }).trim();
+}
+
+function isProcessRunning(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function acquireWatcherLock() {
+  if (fs.existsSync(pidPath)) {
+    const existingPid = Number(fs.readFileSync(pidPath, 'utf8'));
+    if (isProcessRunning(existingPid)) {
+      log(`Auto-push watcher is already running as PID ${existingPid}.`);
+      process.exit(0);
+    }
+    log(`Removing stale auto-push PID lock for ${existingPid || 'unknown PID'}.`);
+    try { fs.unlinkSync(pidPath); } catch {}
+  }
+  fs.writeFileSync(pidPath, String(process.pid));
+}
+
+function releaseWatcherLock() {
+  try {
+    const existingPid = Number(fs.readFileSync(pidPath, 'utf8'));
+    if (existingPid === process.pid) fs.unlinkSync(pidPath);
+  } catch {}
 }
 
 function shouldIgnore(fullPath) {
@@ -106,16 +137,17 @@ function tick() {
   lastSnapshot = nextSnapshot;
 }
 
-process.on('SIGINT', () => {
+function shutdown() {
   try { fs.unlinkSync(lockPath); } catch {}
+  releaseWatcherLock();
   process.exit(0);
-});
+}
 
-process.on('SIGTERM', () => {
-  try { fs.unlinkSync(lockPath); } catch {}
-  process.exit(0);
-});
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);
+process.on('exit', releaseWatcherLock);
 
+acquireWatcherLock();
 lastSnapshot = snapshot();
 log(`Auto-push watcher started in ${repo}`);
 setInterval(tick, pollMs);
