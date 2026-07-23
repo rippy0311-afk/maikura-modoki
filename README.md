@@ -42,6 +42,7 @@ npm run auto-push
 Windowsでは `scripts/start-auto-push.cmd`、macOS / Linuxでは `scripts/start-auto-push.sh` からも起動できます。
 
 共同編集で衝突した場合は `.auto-push.log` にエラーを書きます。衝突を直してから、もう一度ウォッチャーを起動してください。
+すでにウォッチャーが動いている場合、二重起動を避けるため後から起動した方は自動終了します。
 
 ## Voice / Chat Server
 
