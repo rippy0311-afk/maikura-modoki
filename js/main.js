@@ -1120,7 +1120,15 @@ function renderMcSlot(parent, item = null, slotId = '', onSelect = null) {
   if (slotId) slot.dataset.slotId = slotId;
   if (item && item.count > 0) {
     slot.title = item.label;
-    slot.innerHTML = `<div class="swatch" style="${swatchStyle(item.id, item.color)}"></div><span>${item.label}</span><span class="count">${item.count > 1 ? item.count : ''}</span>`;
+    const swatch = document.createElement('div');
+    swatch.className = 'swatch';
+    swatch.setAttribute('style', swatchStyle(item.id, item.color));
+    const label = document.createElement('span');
+    label.textContent = item.label;
+    const count = document.createElement('span');
+    count.className = 'count';
+    count.textContent = item.count > 1 ? item.count : '';
+    slot.append(swatch, label, count);
     slot.draggable = true;
     slot.addEventListener('dragstart', (e) => {
       e.dataTransfer.setData('application/json', JSON.stringify({ item: cloneSlotItem(item), sourceSlotId: slotId }));
@@ -1235,9 +1243,16 @@ function renderCraftRecipes() {
 
     const name = document.createElement('div');
     name.className = 'craft-name';
-    name.innerHTML =
-      `<span class="swatch" style="${swatchStyle(recipeOutputKey(recipe), craftKeyColor(recipeOutputKey(recipe)))}"></span>` +
-      `<span>${recipeLabel(recipe)}<span class="craft-need">${recipeInputText(recipe)}</span></span>`;
+    const swatch = document.createElement('span');
+    swatch.className = 'swatch';
+    swatch.setAttribute('style', swatchStyle(recipeOutputKey(recipe), craftKeyColor(recipeOutputKey(recipe))));
+    const labelWrap = document.createElement('span');
+    labelWrap.textContent = recipeLabel(recipe);
+    const need = document.createElement('span');
+    need.className = 'craft-need';
+    need.textContent = recipeInputText(recipe);
+    labelWrap.appendChild(need);
+    name.append(swatch, labelWrap);
 
     const button = document.createElement('button');
     button.type = 'button';
@@ -1582,9 +1597,24 @@ function buildHotbar() {
     slot.className = 'slot' + (i === hotbarIndex ? ' selected' : '');
     const itemColor = item && typeof item.id === 'number' ? getBlockDisplayColor(item.id) : item?.color;
     const itemCount = item && gameMode === 'survival' ? getInventoryCount(item.id) : '?';
-    slot.innerHTML = item
-      ? `<span class="key">${i + 1}</span><span class="swatch" style="${swatchStyle(item.id, itemColor)}"></span><span class="name">${item.label}</span><span class="count">${itemCount}</span>`
-      : `<span class="key">${i + 1}</span><span class="name">?</span><span class="count"></span>`;
+    const key = document.createElement('span');
+    key.className = 'key';
+    key.textContent = i + 1;
+    const name = document.createElement('span');
+    name.className = 'name';
+    const count = document.createElement('span');
+    count.className = 'count';
+    if (item) {
+      const swatch = document.createElement('span');
+      swatch.className = 'swatch';
+      swatch.setAttribute('style', swatchStyle(item.id, itemColor));
+      name.textContent = item.label;
+      count.textContent = itemCount;
+      slot.append(key, swatch, name, count);
+    } else {
+      name.textContent = '?';
+      slot.append(key, name, count);
+    }
     slot.addEventListener('click', () => selectHotbar(i));
     bar.appendChild(slot);
   }
@@ -1660,7 +1690,12 @@ function updateSurvivalUI() {
     HOTBAR_BLOCKS.slice(0, HOTBAR_SIZE).forEach((block) => {
       const item = document.createElement('div');
       item.className = 'item';
-      item.innerHTML = `<span>${block.label}</span><span class="count">${getBlockInventoryCount(block.id)}</span>`;
+      const label = document.createElement('span');
+      label.textContent = block.label;
+      const count = document.createElement('span');
+      count.className = 'count';
+      count.textContent = getBlockInventoryCount(block.id);
+      item.append(label, count);
       grid.appendChild(item);
     });
   }
@@ -1671,7 +1706,12 @@ function updateSurvivalUI() {
     RESOURCE_ITEMS.forEach((resource) => {
       const item = document.createElement('div');
       item.className = 'item';
-      item.innerHTML = `<span>${resource.label}</span><span class="count">${getInventoryCount(resource.id)}</span>`;
+      const label = document.createElement('span');
+      label.textContent = resource.label;
+      const count = document.createElement('span');
+      count.className = 'count';
+      count.textContent = getInventoryCount(resource.id);
+      item.append(label, count);
       resourceGrid.appendChild(item);
     });
   }
