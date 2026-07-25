@@ -190,6 +190,10 @@
     font-size: 14px; font-weight: 700;
   }
   #minecraft-export-status { color: #dbeafe; line-height: 1.45; }
+  .minecraft-export-help {
+    margin: 0; padding-left: 20px; color: #eef6ff; line-height: 1.55;
+  }
+  .minecraft-export-help strong { color: #fff7b0; }
   #block-color-settings {
     display: grid; grid-template-columns: 1fr; gap: 12px; align-items: center;
     padding: 10px; background: rgba(0,0,0,0.48); color: #fff;
@@ -661,7 +665,14 @@
             <button id="btn-export-java" type="button">Java版データパック</button>
             <button id="btn-export-bedrock" type="button">BE版.mcpack</button>
           </div>
-          <div id="minecraft-export-status">Javaはdatapacksへ入れて /function、BEはインポート後に /function build を実行します。</div>
+          <ol class="minecraft-export-help">
+            <li><strong>Java版:</strong> 「Java版データパック」を押してzipを保存します。</li>
+            <li>コピー先ワールドの <strong>datapacks</strong> フォルダにzipを入れます。</li>
+            <li>ワールドを開いて <strong>/reload</strong>、置きたい場所で <strong>/function block_world_export:build</strong> を実行します。</li>
+            <li><strong>BE版:</strong> 「BE版.mcpack」を押して、保存した.mcpackを開いてインポートします。</li>
+            <li>コピー先ワールドにビヘイビアーパック「Block World Export」を追加し、<strong>/function build</strong> を実行します。</li>
+          </ol>
+          <div id="minecraft-export-status">範囲を広げるほど出力とMinecraft側の生成が重くなります。</div>
         </div>
       </div>
     </section>
