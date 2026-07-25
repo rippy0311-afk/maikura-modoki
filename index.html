@@ -168,6 +168,28 @@
   #visual-settings input {
     width: 22px; height: 22px; accent-color: #7fce62;
   }
+  #minecraft-export-settings {
+    display: grid; grid-template-columns: 1fr; gap: 10px;
+    padding: 10px; background: rgba(0,0,0,0.48); color: #fff;
+    font-size: 13px;
+  }
+  #minecraft-export-settings label {
+    display: grid; grid-template-columns: 1fr 90px; gap: 8px; align-items: center;
+  }
+  #minecraft-export-settings input {
+    width: 100%; padding: 6px 8px; color: #fff;
+    background: rgba(32,42,189,0.92); border: 1px solid rgba(255,255,255,0.35); border-radius: 6px;
+  }
+  .minecraft-export-actions {
+    display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px;
+  }
+  .minecraft-export-actions button {
+    min-height: 42px; padding: 8px; cursor: pointer;
+    background: rgba(32,42,189,0.96); color: #fff;
+    border: 1px solid rgba(255,255,255,0.35); border-radius: 6px;
+    font-size: 14px; font-weight: 700;
+  }
+  #minecraft-export-status { color: #dbeafe; line-height: 1.45; }
   #block-color-settings {
     display: grid; grid-template-columns: 1fr; gap: 12px; align-items: center;
     padding: 10px; background: rgba(0,0,0,0.48); color: #fff;
@@ -627,6 +649,23 @@
       </div>
     </section>
 
+    <section class="settings-section" data-section="minecraft-export">
+      <button class="settings-toggle" type="button">Minecraftへエクスポート</button>
+      <div class="settings-content">
+        <div id="minecraft-export-settings">
+          <label>
+            <span>コピー範囲（プレイヤー中心・半径）</span>
+            <input id="minecraft-export-range" type="number" min="8" max="160" step="8" value="48">
+          </label>
+          <div class="minecraft-export-actions">
+            <button id="btn-export-java" type="button">Java版データパック</button>
+            <button id="btn-export-bedrock" type="button">BE版.mcpack</button>
+          </div>
+          <div id="minecraft-export-status">Javaはdatapacksへ入れて /function、BEはインポート後に /function build を実行します。</div>
+        </div>
+      </div>
+    </section>
+
     <section class="settings-section" data-section="block-texture">
       <button class="settings-toggle" type="button">ブロックの見た目</button>
       <div class="settings-content">
@@ -774,6 +813,7 @@
 <script src="js/landmarks.js"></script>
 <script src="js/image.js"></script>
 <script src="js/obj_model.js"></script>
+<script src="js/minecraft_export.js"></script>
 <script src="js/ai_config.js"></script>
 <script src="js/ai_blueprint.js"></script>
 <script src="js/voice_config.js"></script>
