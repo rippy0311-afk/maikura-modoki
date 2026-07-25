@@ -2382,14 +2382,54 @@ function updateHudMode() {
 }
 
 /* ============ 画像インポート ============ */
-function saveScreenshot() {
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  a.href = renderer.domElement.toDataURL('image/png');
-  a.download = 'block-world.png';
+  a.href = url;
+  a.download = filename;
   a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-/* ============ メインループ ============ */
+function saveScreenshot() {
+  renderer.domElement.toBlob((blob) => {
+    if (blob) downloadBlob(blob, 'block-world.png');
+  }, 'image/png');
+}
+
+async function exportMinecraftPack(edition) {
+  if (!world || !player || !activeWorldId) {
+    showToast('??????????????');
+    return;
+  }
+  const status = document.getElementById('minecraft-export-status');
+  const rangeInput = document.getElementById('minecraft-export-range');
+  const range = clampMinecraftExportRange(rangeInput?.value);
+  const isBedrock = edition === 'bedrock';
+  const label = isBedrock ? 'BE?.mcpack' : 'Java???????';
+  try {
+    setLoadingProgress(0.1, `${label} ????...`);
+    await nextFrame();
+    const result = isBedrock ? buildBedrockBehaviorPack(world, player, range) : buildJavaDatapack(world, player, range);
+    setLoadingProgress(0.9, `${result.meta.commands.length} ??????????...`);
+    await nextFrame();
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const filename = isBedrock ? `block-world-${stamp}.mcpack` : `block-world-java-${stamp}.zip`;
+    downloadBlob(result.blob, filename);
+    const message = `${label}: ${result.meta.commands.length} ???? / ?? ${result.meta.range} ???????`;
+    if (status) status.textContent = message;
+    showToast(message);
+    setLoadingProgress(1, '??');
+  } catch (err) {
+    console.error(err);
+    const message = `${label} ??????????`;
+    if (status) status.textContent = message;
+    showToast(message);
+  } finally {
+    hideLoadingProgress();
+  }
+}
+
 function updateHeldMining(dt) {
   if (!miningHeld || inventoryOpen || !(pointerLocked || touchPlayActive)) {
     miningCooldown = 0;
