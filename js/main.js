@@ -2371,6 +2371,8 @@ function setupMenuUI() {
   });
   document.getElementById('btn-lang-ja')?.addEventListener('click', () => setLanguage('ja'));
   document.getElementById('btn-lang-en')?.addEventListener('click', () => setLanguage('en'));
+  document.getElementById('btn-export-java')?.addEventListener('click', () => exportMinecraftPack('java'));
+  document.getElementById('btn-export-bedrock')?.addEventListener('click', () => exportMinecraftPack('bedrock'));
   applyLanguage();
 }
 
