@@ -13,6 +13,7 @@ Minecraft風のブラウザ3Dブロックゲームです。GitHub Pagesで公開
 - iPad向けタッチ操作
 - WebRTC方式のボイスチャット
 - 同じ信号サーバーを使うテキストチャット共有
+- Java版データパック / Bedrock版.mcpack へのMinecraftエクスポート
 
 ## 公開
 
@@ -27,6 +28,7 @@ Minecraft風のブラウザ3Dブロックゲームです。GitHub Pagesで公開
 - `js/player.js`: プレイヤー移動と当たり判定
 - `js/crafting.js`: クラフト定義
 - `js/inventory.js`: ホットバー、所持数、防具、リソース定義
+- `js/minecraft_export.js`: Minecraft Java / Bedrock 向けエクスポート
 - `js/main.js`: ゲーム本体、UI、保存、入力
 - `server/voice-server.js`: ボイスチャットとテキストチャット用の信号サーバー
 
@@ -56,3 +58,12 @@ npm run start:voice
 ```
 
 公開する場合は Render / Railway / Fly.io などにこのリポジトリをつなぎ、起動コマンドを `npm run start:voice` にします。公開URLが `https://example.com` の場合、ゲーム側のボイス設定には `wss://example.com` を入力します。
+
+## Minecraft Export
+
+ゲーム内メニューの「Minecraftへエクスポート」から、プレイヤー周辺の範囲をMinecraft用ファイルに出力できます。
+
+- Java版: zipをコピー先ワールドの `datapacks` フォルダに入れ、`/reload` 後に `/function block_world_export:build`
+- Bedrock版: `.mcpack` を開いてインポートし、コピー先ワールドにビヘイビアーパックを追加して `/function build`
+
+ブラウザ上で安全に生成するため、エクスポートはプレイヤー中心の指定範囲です。チェストの中身、独自アイテム、完全な色は近い標準ブロックに変換されます。
