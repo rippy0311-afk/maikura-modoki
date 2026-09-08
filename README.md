@@ -14,6 +14,7 @@ Minecraft風のブラウザ3Dブロックゲームです。GitHub Pagesで公開
 - WebRTC方式のボイスチャット
 - 同じ信号サーバーを使うテキストチャット共有
 - Java版データパック / Bedrock版.mcpack へのMinecraftエクスポート
+- 旅のしおり: ワールドごとに1つだけ現在地を記録して戻れる軽い探索補助
 
 ## 公開
 
@@ -29,6 +30,7 @@ Minecraft風のブラウザ3Dブロックゲームです。GitHub Pagesで公開
 - `js/crafting.js`: クラフト定義
 - `js/inventory.js`: ホットバー、所持数、防具、リソース定義
 - `js/minecraft_export.js`: Minecraft Java / Bedrock 向けエクスポート
+- `js/travel_marker.js`: 旅のしおり機能
 - `js/main.js`: ゲーム本体、UI、保存、入力
 - `server/voice-server.js`: ボイスチャットとテキストチャット用の信号サーバー
 
@@ -67,3 +69,7 @@ npm run start:voice
 - Bedrock版: `.mcpack` を開いてインポートし、コピー先ワールドにビヘイビアーパックを追加して `/function build`
 
 ブラウザ上で安全に生成するため、エクスポートはプレイヤー中心の指定範囲です。チェストの中身、独自アイテム、完全な色は近い標準ブロックに変換されます。
+
+## Optional Features
+
+`js/travel_marker.js` は独立した追加機能です。消したい場合は、`index.html` の「旅のしおり」セクションと `<script src="js/travel_marker.js"></script>` を消し、`js/travel_marker.js` を削除します。

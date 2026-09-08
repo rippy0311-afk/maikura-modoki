@@ -194,6 +194,21 @@
     margin: 0; padding-left: 20px; color: #eef6ff; line-height: 1.55;
   }
   .minecraft-export-help strong { color: #fff7b0; }
+  #travel-marker-settings {
+    display: grid; grid-template-columns: 1fr; gap: 10px;
+    padding: 10px; background: rgba(0,0,0,0.48); color: #fff;
+    font-size: 13px;
+  }
+  .travel-marker-actions {
+    display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px;
+  }
+  .travel-marker-actions button {
+    min-height: 42px; padding: 8px; cursor: pointer;
+    background: rgba(32,42,189,0.96); color: #fff;
+    border: 1px solid rgba(255,255,255,0.35); border-radius: 6px;
+    font-size: 14px; font-weight: 700;
+  }
+  #travel-marker-status { color: #dbeafe; line-height: 1.45; }
   #block-color-settings {
     display: grid; grid-template-columns: 1fr; gap: 12px; align-items: center;
     padding: 10px; background: rgba(0,0,0,0.48); color: #fff;
@@ -653,6 +668,21 @@
       </div>
     </section>
 
+    <section class="settings-section" data-section="travel-marker">
+      <button class="settings-toggle" type="button">旅のしおり</button>
+      <div class="settings-content">
+        <div id="travel-marker-settings">
+          <div>迷ったとき用に、今いる場所を1つだけ記録できます。ワールド本体は変更しません。</div>
+          <div class="travel-marker-actions">
+            <button id="btn-travel-save" type="button">現在地を記録</button>
+            <button id="btn-travel-return" type="button">記録地点へ戻る</button>
+            <button id="btn-travel-clear" type="button">記録を消す</button>
+          </div>
+          <div id="travel-marker-status">まだ記録地点はありません。</div>
+        </div>
+      </div>
+    </section>
+
     <section class="settings-section" data-section="minecraft-export">
       <button class="settings-toggle" type="button">Minecraftへエクスポート</button>
       <div class="settings-content">
@@ -829,6 +859,7 @@
 <script src="js/ai_blueprint.js"></script>
 <script src="js/voice_config.js"></script>
 <script src="js/main.js"></script>
+<script src="js/travel_marker.js"></script>
 <script src="js/voice.js"></script>
 </body>
 </html>
